@@ -1,0 +1,8 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Run archive: a local experiment log. Each manifest records the git commit
+# it was produced from, so provenance survives without committing results.
+runs/

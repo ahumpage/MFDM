@@ -10,7 +10,10 @@ Sets
     FUELS   fuels
 
 Parameters
-    availability[p][t]  MW that plant p can supply in hour t
+    availability[p][t]  MW that plant p can supply in hour t. Thermal plants
+                        are available at nameplate around the clock; wind and
+                        solar are nameplate scaled by an hourly capacity
+                        factor read from profiles.csv.
     marginal_cost[p]    fuel_price / efficiency + VOM   ($/MWh)
     demand[t]           MWh required in hour t
 
@@ -27,6 +30,9 @@ Constraints
 After solving, the hourly market clearing price is taken as the marginal cost
 of the most expensive plant running in that hour, and is cross-checked against
 the dual (shadow price) of the energy balance constraint.
+
+Outputs two CSVs, dispatch_results.csv and plant_summary.csv. Run dashboard.py
+afterwards to explore the results interactively.
 """
 
 from pathlib import Path
@@ -34,10 +40,6 @@ import sys
 
 import pandas as pd
 import pulp
-
-import matplotlib
-matplotlib.use("Agg")          # no GUI window; must be set before pyplot
-import matplotlib.pyplot as plt
 
 
 # --------------------------------------------------------------------------
@@ -49,25 +51,20 @@ DATA_DIR = Path(__file__).resolve().parent
 PLANTS_FILE = DATA_DIR / "plants.csv"
 FUEL_FILE = DATA_DIR / "fuel.csv"
 DEMAND_FILE = DATA_DIR / "demand.csv"
+PROFILE_FILE = DATA_DIR / "profiles.csv"
+
 
 # Generation below this is treated as "not running" when finding the marginal
 # plant, so that solver round-off does not set the price.
 TOL = 1e-6
 
-# Consistent colour per plant technology across every chart.
-TECH_COLOURS = {
-    "Solar": "#F5B301",
-    "Wind": "#4CAF50",
-    "Coal": "#4A4A4A",
-    "Gas": "#1F77B4",
-    "Diesel": "#8B4513",
-    "Nuclear": "#9467BD",
-    "Hydrogen": "#17BECF",
+# Technologies whose output is limited by an hourly resource profile rather
+# than being available at nameplate around the clock. The value is the token
+# looked for in the profiles.csv column headers.
+PROFILE_TECHNOLOGIES = {
+    "Wind": "wind",
+    "Solar": "solar",
 }
-FALLBACK_COLOURS = ["#E377C2", "#7F7F7F", "#BCBD22", "#2CA02C", "#D62728"]
-
-# Hours shown in the zoomed-in dispatch plot.
-ZOOM_HOURS = 168        # one week
 
 
 # --------------------------------------------------------------------------
@@ -75,14 +72,28 @@ ZOOM_HOURS = 168        # one week
 # --------------------------------------------------------------------------
 
 def load_data():
-    """Read the three input CSVs and return them as DataFrames."""
-    for path in (PLANTS_FILE, FUEL_FILE, DEMAND_FILE):
+    """Read the four input CSVs and return them as DataFrames."""
+    for path in (PLANTS_FILE, FUEL_FILE, DEMAND_FILE, PROFILE_FILE):
         if not path.exists():
             raise FileNotFoundError("Could not find input file: {}".format(path))
 
-    plants = pd.read_csv(PLANTS_FILE)
+    # keep_default_na=False so that Solar's fuel of "None" stays the literal
+    # string "None" rather than becoming NaN.
+    plants = pd.read_csv(PLANTS_FILE, keep_default_na=False)
     fuel = pd.read_csv(FUEL_FILE)
     demand = pd.read_csv(DEMAND_FILE)
+
+    # profiles.csv has two header rows: a region row (",FRA,FRA") and a
+    # series row ("hours,wind (won),solar (solEB)"). Read both, then flatten
+    # to single names of the form "FRA wind (won)", keeping the region so
+    # multi-region files stay unambiguous.
+    profile = pd.read_csv(PROFILE_FILE, header=[0, 1])
+    flat = []
+    for region, series in profile.columns:
+        region = "" if str(region).startswith("Unnamed") else str(region).strip()
+        series = str(series).strip()
+        flat.append("{} {}".format(region, series).strip())
+    profile.columns = flat
 
     # Tidy up stray whitespace in the text columns.
     for df in (plants, fuel, demand):
@@ -91,14 +102,14 @@ def load_data():
         plants[col] = plants[col].astype(str).str.strip()
     fuel["Technology"] = fuel["Technology"].astype(str).str.strip()
 
-    return plants, fuel, demand
+    return plants, fuel, demand, profile
 
 
 # --------------------------------------------------------------------------
 # Steps 2 and 3 - sets and parameters
 # --------------------------------------------------------------------------
 
-def build_parameters(plants, fuel, demand):
+def build_parameters(plants, fuel, demand, profile):
     """Turn the raw DataFrames into the sets and parameter dictionaries."""
 
     # --- sets ---
@@ -143,10 +154,17 @@ def build_parameters(plants, fuel, demand):
         # marginal cost = fuel cost / efficiency + variable O&M
         marginal_cost[p] = price_of(row["Fuel"]) / efficiency[p] + vom[p]
 
-    # --- availability: flat at nameplate capacity in every hour ---
-    # Stored as a full plant-by-hour table so a real hourly profile can be
-    # dropped in later without changing any of the constraints below.
-    availability = {p: {t: capacity[p] for t in HOURS} for p in PLANTS}
+    # --- availability: nameplate capacity, scaled by an hourly resource
+    # profile for the technologies that have one ---
+    profile_factors = build_profile_factors(profile, technology, HOURS)
+    availability = {}
+    for p in PLANTS:
+        factors = profile_factors.get(p)
+        if factors is None:
+            # Thermal plant: assumed available at nameplate around the clock.
+            availability[p] = {t: capacity[p] for t in HOURS}
+        else:
+            availability[p] = {t: capacity[p] * factors[t] for t in HOURS}
 
     # --- demand ---
     demand_col = [c for c in demand.columns if c.lower().startswith("demand")][0]
@@ -162,8 +180,73 @@ def build_parameters(plants, fuel, demand):
         "plant_fuel": plant_fuel,
         "marginal_cost": marginal_cost,
         "availability": availability,
+        "profiled": set(profile_factors),
         "demand": demand_by_hour,
     }
+
+
+def build_profile_factors(profile, technology, HOURS):
+    """Map each profiled plant to its hourly capacity factor.
+
+    Returns {plant: {hour: factor}} containing only the plants whose
+    technology has a matching column in profiles.csv. Plants absent from the
+    result are treated as available at nameplate in every hour.
+    """
+    hour_col = profile.columns[0]
+    available_hours = set(int(h) for h in profile[hour_col])
+
+    missing = [t for t in HOURS if t not in available_hours]
+    if missing:
+        raise ValueError(
+            "profiles.csv is missing {} of the {} hours in demand.csv "
+            "(first missing: hour {}).".format(len(missing), len(HOURS), missing[0]))
+
+    # Restrict to the modelled hours. profiles.csv covers a full year (8784
+    # hours) while demand.csv may cover only part of it.
+    idx = profile[hour_col].astype(int)
+    sub = profile.set_index(idx).loc[HOURS]
+
+    factors = {}
+    for plant, tech in technology.items():
+        token = PROFILE_TECHNOLOGIES.get(tech)
+        if token is None:
+            continue
+
+        matches = [c for c in profile.columns
+                   if c is not hour_col and token in c.lower()]
+        if not matches:
+            print("  note: technology '{}' has no profile column in profiles.csv, "
+                  "treating {} as always available".format(tech, plant))
+            continue
+        if len(matches) > 1:
+            raise ValueError(
+                "Technology '{}' matches more than one profile column: {}. "
+                "Column names must be unambiguous.".format(tech, matches))
+
+        series = sub[matches[0]].astype(float)
+        lo, hi = float(series.min()), float(series.max())
+        if lo < -TOL or hi > 1.0 + TOL:
+            raise ValueError(
+                "Profile column '{}' has values outside 0 to 1 (min {:.4f}, "
+                "max {:.4f}). Expected capacity factors.".format(matches[0], lo, hi))
+
+        factors[plant] = {t: float(v) for t, v in zip(HOURS, series.values)}
+
+    return factors
+
+
+def check_demand(par):
+    """Flag suspicious demand values. These are not fatal, but a zero in the
+    middle of an otherwise continuous series is usually a data entry slip
+    rather than a real hour of no demand."""
+    zeros = [t for t in par["HOURS"] if par["demand"][t] <= 0.0]
+    if zeros:
+        shown = ", ".join(str(t) for t in zeros[:10])
+        more = " and {} more".format(len(zeros) - 10) if len(zeros) > 10 else ""
+        print("  WARNING: demand is zero or negative in {} hour(s): {}{}."
+              .format(len(zeros), shown, more))
+        print("           Check demand.csv. The model will dispatch nothing "
+              "in those hours.\n")
 
 
 def check_feasibility(par):
@@ -176,10 +259,15 @@ def check_feasibility(par):
             short.append((t, par["demand"][t], total))
     if short:
         t, d, a = short[0]
+        worst = max(short, key=lambda r: r[1] - r[2])
         raise ValueError(
-            "Demand exceeds available capacity in {} hour(s). "
-            "First is hour {}: demand {:.2f} MWh vs {:.2f} MW available."
-            .format(len(short), t, d, a)
+            "Demand exceeds available capacity in {} of {} hour(s). "
+            "First is hour {}: demand {:.2f} MWh vs {:.2f} MW available. "
+            "Worst is hour {}, short by {:.2f} MW. "
+            "Note that wind and solar are limited by their hourly profiles, "
+            "so firm capacity is what matters at peak."
+            .format(len(short), len(par["HOURS"]), t, d, a,
+                    worst[0], worst[1] - worst[2])
         )
 
 
@@ -255,6 +343,13 @@ def build_results(par, prob, gen):
         for p in PLANTS:
             row["{} (MWh)".format(p)] = output[p]
 
+        # Availability is written out as well as generation, because a
+        # profiled plant sitting at its resource limit is at capacity even
+        # though it is far below nameplate. Anything reading these results
+        # needs the hourly limit to tell "maxed out" from "part loaded".
+        for p in PLANTS:
+            row["{} Available (MWh)".format(p)] = par["availability"][p][t]
+
         # Clearing price, method 1: merit order. The most expensive plant
         # actually generating sets the price.
         running = [p for p in PLANTS if output[p] > TOL]
@@ -273,6 +368,14 @@ def build_results(par, prob, gen):
         row["Shadow Price ($/MWh)"] = price_dual
         row["Production Cost ($)"] = sum(mc[p] * output[p] for p in PLANTS)
         row["Market Cost ($)"] = price_merit * par["demand"][t]
+
+        # Curtailment: profiled renewable energy that was available but not
+        # taken, because demand was already met by cheaper or equal output.
+        curtailed = 0.0
+        for p in par["profiled"]:
+            curtailed += max(0.0, par["availability"][p][t] - output[p])
+        row["Curtailment (MWh)"] = curtailed
+
         rows.append(row)
 
     if mismatches:
@@ -294,6 +397,17 @@ def build_summary(par, results):
         total = series.sum()
         max_possible = par["capacity"][p] * n_hours
 
+        # Energy the plant could have produced given its resource. For a
+        # thermal plant this is just nameplate around the clock; for wind and
+        # solar it is limited by the hourly profile.
+        is_profiled = p in par["profiled"]
+        available = sum(par["availability"][p][t] for t in par["HOURS"])
+
+        # Curtailment only means something for a profiled plant: energy the
+        # resource offered but the dispatch did not take. Idle thermal
+        # capacity is not curtailment, it is simply not being called on.
+        curtailed = max(0.0, available - total) if is_profiled else 0.0
+
         # A plant sets the price in an hour when it is running and its
         # marginal cost equals the clearing price.
         is_running = series > TOL
@@ -305,173 +419,23 @@ def build_summary(par, results):
             "Technology": par["technology"][p],
             "Fuel": par["plant_fuel"][p],
             "Capacity (MW)": par["capacity"][p],
+            "Profiled": is_profiled,
             "Marginal Cost ($/MWh)": par["marginal_cost"][p],
             "Total Generation (MWh)": total,
+            "Available Energy (MWh)": available,
+            "Curtailed (MWh)": curtailed,
+            "Curtailment (%)": (100.0 * curtailed / available
+                                if is_profiled and available > 0 else 0.0),
             "Share of Demand (%)": 100.0 * total / results["Demand (MWh)"].sum(),
             "Capacity Factor (%)": 100.0 * total / max_possible if max_possible else 0.0,
+            "Availability Factor (%)": (100.0 * available / max_possible
+                                        if max_possible else 0.0),
             "Hours Running": int(is_running.sum()),
             "Hours Setting Price": hours_setting_price,
             "Production Cost ($)": total * par["marginal_cost"][p],
         })
 
     return pd.DataFrame(rows).sort_values("Marginal Cost ($/MWh)").reset_index(drop=True)
-
-
-# --------------------------------------------------------------------------
-# Step 10 - plots
-# --------------------------------------------------------------------------
-
-def colour_for(par, plant, index):
-    tech = par["technology"].get(plant, "")
-    if tech in TECH_COLOURS:
-        return TECH_COLOURS[tech]
-    return FALLBACK_COLOURS[index % len(FALLBACK_COLOURS)]
-
-
-def plot_dispatch_stack(par, results, path, hours=None, title=None):
-    """Stacked generation with demand overlaid. If the dashed demand line does
-    not sit exactly on top of the stack, the energy balance is broken."""
-
-    df = results if hours is None else results.head(hours)
-
-    # Stack cheapest first so the picture reads as a merit order.
-    order = sorted(par["PLANTS"], key=lambda p: par["marginal_cost"][p])
-    series = [df["{} (MWh)".format(p)].values for p in order]
-    colours = [colour_for(par, p, i) for i, p in enumerate(order)]
-    labels = ["{} ({}) ${:.2f}/MWh".format(p, par["technology"][p], par["marginal_cost"][p])
-              for p in order]
-
-    fig, ax = plt.subplots(figsize=(14, 6))
-    ax.stackplot(df["Hour"].values, *series, labels=labels, colors=colours, alpha=0.9)
-    ax.plot(df["Hour"].values, df["Demand (MWh)"].values,
-            color="black", linestyle="--", linewidth=1.4, label="Demand")
-
-    ax.set_xlabel("Hour")
-    ax.set_ylabel("Generation (MWh)")
-    ax.set_title(title or "Dispatch by plant")
-    ax.legend(loc="upper left", fontsize=8, ncol=2)
-    ax.margins(x=0)
-    ax.grid(alpha=0.3)
-    fig.tight_layout()
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
-
-
-def plot_price(par, results, path):
-    """Price is piecewise constant, so draw it as a step line. Expect only the
-    distinct marginal cost values to appear."""
-
-    fig, ax = plt.subplots(figsize=(14, 5))
-    ax.plot(results["Hour"].values, results["Clearing Price ($/MWh)"].values,
-            drawstyle="steps-post", color="#C0392B", linewidth=1.2)
-
-    for i, p in enumerate(sorted(par["PLANTS"], key=lambda x: par["marginal_cost"][x])):
-        ax.axhline(par["marginal_cost"][p], color=colour_for(par, p, i),
-                   linestyle=":", linewidth=1,
-                   label="{} ${:.2f}/MWh".format(p, par["marginal_cost"][p]))
-
-    ax.set_xlabel("Hour")
-    ax.set_ylabel("Clearing price ($/MWh)")
-    ax.set_title("Hourly market clearing price (marginal cost of the most expensive plant running)")
-    ax.legend(loc="upper left", fontsize=8)
-    ax.margins(x=0)
-    ax.grid(alpha=0.3)
-    fig.tight_layout()
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
-
-
-def plot_price_duration(results, path):
-    """Price sorted high to low: what share of the month each plant sets price."""
-
-    prices = results["Clearing Price ($/MWh)"].sort_values(ascending=False).values
-    pct = [100.0 * (i + 1) / len(prices) for i in range(len(prices))]
-
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(pct, prices, drawstyle="steps-post", color="#C0392B", linewidth=1.8)
-    ax.fill_between(pct, prices, step="post", alpha=0.25, color="#C0392B")
-    ax.set_xlabel("Percent of hours (%)")
-    ax.set_ylabel("Clearing price ($/MWh)")
-    ax.set_title("Price duration curve")
-    ax.margins(x=0)
-    ax.grid(alpha=0.3)
-    fig.tight_layout()
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
-
-
-def plot_load_duration(par, results, path):
-    """Demand sorted high to low, with cumulative capacity lines. Where the
-    curve crosses a line is where the marginal plant changes, so this should
-    agree with the price duration curve."""
-
-    loads = results["Demand (MWh)"].sort_values(ascending=False).values
-    pct = [100.0 * (i + 1) / len(loads) for i in range(len(loads))]
-
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(pct, loads, color="black", linewidth=1.8, label="Demand")
-
-    cumulative = 0.0
-    for i, p in enumerate(sorted(par["PLANTS"], key=lambda x: par["marginal_cost"][x])):
-        cumulative += par["capacity"][p]
-        ax.axhline(cumulative, color=colour_for(par, p, i), linestyle="--", linewidth=1.2,
-                   label="cum. capacity through {} = {:.0f} MW".format(p, cumulative))
-
-    ax.set_xlabel("Percent of hours (%)")
-    ax.set_ylabel("Demand (MWh)")
-    ax.set_title("Load duration curve vs cumulative capacity")
-    ax.legend(loc="upper right", fontsize=8)
-    ax.margins(x=0)
-    ax.grid(alpha=0.3)
-    fig.tight_layout()
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
-
-
-def plot_energy_mix(par, summary, path):
-    """Total energy per plant, labelled with capacity factor."""
-
-    fig, ax = plt.subplots(figsize=(9, 5.5))
-    colours = [colour_for(par, p, i) for i, p in enumerate(summary["Plant"])]
-    bars = ax.bar(summary["Plant"], summary["Total Generation (MWh)"], color=colours)
-
-    top = summary["Total Generation (MWh)"].max()
-    for bar, cf, share in zip(bars, summary["Capacity Factor (%)"], summary["Share of Demand (%)"]):
-        ax.text(bar.get_x() + bar.get_width() / 2,
-                bar.get_height() + top * 0.015,
-                "CF {:.1f}%\n{:.1f}% of demand".format(cf, share),
-                ha="center", va="bottom", fontsize=9)
-
-    ax.set_ylabel("Total generation (MWh)")
-    ax.set_title("Energy mix over the modelled period")
-    ax.set_ylim(0, top * 1.20 if top else 1)
-    ax.grid(alpha=0.3, axis="y")
-    fig.tight_layout()
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
-
-
-def make_plots(par, results, summary, out_dir):
-    """Write all PNGs. Never let a plotting failure lose the CSV results."""
-    try:
-        plot_dispatch_stack(par, results, out_dir / "plot_dispatch_stack.png",
-                            title="Dispatch by plant - all {} hours".format(len(results)))
-        n = min(ZOOM_HOURS, len(results))
-        plot_dispatch_stack(par, results, out_dir / "plot_dispatch_week.png",
-                            hours=n, title="Dispatch by plant - first {} hours".format(n))
-        plot_price(par, results, out_dir / "plot_price.png")
-        plot_price_duration(results, out_dir / "plot_price_duration.png")
-        plot_load_duration(par, results, out_dir / "plot_load_duration.png")
-        plot_energy_mix(par, summary, out_dir / "plot_energy_mix.png")
-
-        print("Plots written:")
-        for name in ("plot_dispatch_stack.png", "plot_dispatch_week.png", "plot_price.png",
-                     "plot_price_duration.png", "plot_load_duration.png", "plot_energy_mix.png"):
-            print("  {}".format(out_dir / name))
-        print("")
-    except Exception as exc:                              # noqa: BLE001
-        print("WARNING: plotting failed ({}: {}). CSV results were still written.\n"
-              .format(type(exc).__name__, exc))
 
 
 # --------------------------------------------------------------------------
@@ -483,9 +447,10 @@ def report(par, results, summary):
     print("MARGINAL COSTS  (fuel price / efficiency + VOM)")
     print("-" * 68)
     for _, r in summary.iterrows():
-        print("  {:<10} {:<10} {:>7.1f} MW   ${:>7.2f}/MWh"
+        print("  {:<10} {:<10} {:>7.1f} MW   ${:>7.2f}/MWh{}"
               .format(r["Plant"], str(r["Technology"]), r["Capacity (MW)"],
-                      r["Marginal Cost ($/MWh)"]))
+                      r["Marginal Cost ($/MWh)"],
+                      "   (profiled)" if r["Profiled"] else ""))
 
     print("\n" + "-" * 68)
     print("DISPATCH SUMMARY")
@@ -494,6 +459,18 @@ def report(par, results, summary):
         print("  {:<10} {:>12,.1f} MWh   CF {:>5.1f}%   running {:>4} h   sets price {:>4} h"
               .format(r["Plant"], r["Total Generation (MWh)"], r["Capacity Factor (%)"],
                       r["Hours Running"], r["Hours Setting Price"]))
+
+    profiled = summary[summary["Profiled"]]
+    if not profiled.empty:
+        print("\n" + "-" * 68)
+        print("RENEWABLE RESOURCE  (capacity factor is after curtailment)")
+        print("-" * 68)
+        for _, r in profiled.iterrows():
+            print("  {:<10} resource {:>5.1f}%   used {:>5.1f}%   "
+                  "available {:>10,.1f} MWh   curtailed {:>8,.1f} MWh ({:.1f}%)"
+                  .format(r["Plant"], r["Availability Factor (%)"],
+                          r["Capacity Factor (%)"], r["Available Energy (MWh)"],
+                          r["Curtailed (MWh)"], r["Curtailment (%)"]))
 
     total_demand = results["Demand (MWh)"].sum()
     total_gen = summary["Total Generation (MWh)"].sum()
@@ -514,6 +491,16 @@ def report(par, results, summary):
     print("  Load-weighted avg price    {:>16,.2f} $/MWh".format(market_cost / total_demand))
     print("  Producer surplus           {:>16,.2f} $      (market - production)"
           .format(market_cost - prod_cost))
+
+    total_curtailed = results["Curtailment (MWh)"].sum()
+    if par["profiled"]:
+        avail = summary.loc[summary["Profiled"], "Available Energy (MWh)"].sum()
+        used = summary.loc[summary["Profiled"], "Total Generation (MWh)"].sum()
+        print("  Renewable energy used      {:>16,.1f} MWh   ({:.1f}% of demand)"
+              .format(used, 100.0 * used / total_demand if total_demand else 0.0))
+        print("  Renewable curtailed        {:>16,.1f} MWh   ({:.1f}% of available)"
+              .format(total_curtailed,
+                      100.0 * total_curtailed / avail if avail else 0.0))
 
     # Energy balance check.
     gap = abs(total_gen - total_demand)
@@ -538,11 +525,16 @@ def main():
     print("MY FIRST DISPATCH MODEL")
     print("=" * 68 + "\n")
 
-    plants, fuel, demand = load_data()
-    print("Loaded {} plants, {} fuels, {} hours.\n"
-          .format(len(plants), len(fuel), len(demand)))
+    plants, fuel, demand, profile = load_data()
+    print("Loaded {} plants, {} fuels, {} hours, {} profile rows.\n"
+          .format(len(plants), len(fuel), len(demand), len(profile)))
 
-    par = build_parameters(plants, fuel, demand)
+    par = build_parameters(plants, fuel, demand, profile)
+    if par["profiled"]:
+        print("  profiled technologies: {}\n".format(
+            ", ".join("{} ({})".format(p, par["technology"][p])
+                      for p in sorted(par["profiled"]))))
+    check_demand(par)
     check_feasibility(par)
 
     prob, gen = build_and_solve(par)
@@ -556,7 +548,6 @@ def main():
     summary.round(6).to_csv(summary_path, index=False)
     print("Results written:\n  {}\n  {}\n".format(results_path, summary_path))
 
-    make_plots(par, results, summary, DATA_DIR)
     report(par, results, summary)
 
 
