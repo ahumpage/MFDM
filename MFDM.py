@@ -36,10 +36,14 @@ afterwards to explore the results interactively.
 """
 
 from pathlib import Path
+import argparse
 import sys
+import time
 
 import pandas as pd
 import pulp
+
+import runstore
 
 
 # --------------------------------------------------------------------------
@@ -520,7 +524,21 @@ def report(par, results, summary):
 # Main
 # --------------------------------------------------------------------------
 
-def main():
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Least-cost economic dispatch model.")
+    parser.add_argument("--label", default=None,
+                        help="short name for this run, used in the archive id")
+    parser.add_argument("--notes", default=None,
+                        help="longer description stored with the run")
+    parser.add_argument("--no-archive", action="store_true",
+                        help="solve and write results without archiving the run")
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+
     print("\n" + "=" * 68)
     print("MY FIRST DISPATCH MODEL")
     print("=" * 68 + "\n")
@@ -537,7 +555,9 @@ def main():
     check_demand(par)
     check_feasibility(par)
 
+    started = time.time()
     prob, gen = build_and_solve(par)
+    solve_seconds = round(time.time() - started, 3)
 
     results = build_results(par, prob, gen)
     summary = build_summary(par, results)
@@ -547,6 +567,27 @@ def main():
     results.round(6).to_csv(results_path, index=False)
     summary.round(6).to_csv(summary_path, index=False)
     print("Results written:\n  {}\n  {}\n".format(results_path, summary_path))
+
+    # Archive the run so it can be compared or restored later. A failure here
+    # must not lose the results, which are already safely on disk.
+    if not args.no_archive:
+        try:
+            manifest = runstore.archive_run(
+                label=args.label, notes=args.notes,
+                solver_status=pulp.LpStatus[prob.status], seconds=solve_seconds)
+            git = manifest["git"]
+            print("Archived as run: {}".format(manifest["id"]))
+            if git.get("short"):
+                print("  git {}{}   compare with:  python runs.py diff {} latest\n"
+                      .format(git["short"],
+                              " (dirty)" if git.get("dirty") else "",
+                              manifest["id"]))
+            else:
+                print("")
+        except Exception as exc:                             # noqa: BLE001
+            print("WARNING: could not archive this run ({}: {}). "
+                  "Results were still written.\n"
+                  .format(type(exc).__name__, exc))
 
     report(par, results, summary)
 
