@@ -33,6 +33,15 @@ the dual (shadow price) of the energy balance constraint.
 
 Outputs two CSVs, dispatch_results.csv and plant_summary.csv. Run dashboard.py
 afterwards to explore the results interactively.
+
+Array layout
+    Hourly quantities are held as numpy arrays of shape (n_plants, n_hours),
+    with rows ordered by PLANTS and columns ordered by HOURS. The parameter
+    dictionary carries `avail` (availability), `mc_vec` (marginal cost, one
+    per plant), `demand_vec` and `profiled_mask` in this form. The older
+    dict-of-dicts views (`availability`, `marginal_cost`, `demand`) are kept
+    alongside them because the reporting code reads more clearly with named
+    lookups; they are derived from the arrays so the two cannot drift apart.
 """
 
 from pathlib import Path
@@ -40,6 +49,7 @@ import argparse
 import sys
 import time
 
+import numpy as np
 import pandas as pd
 import pulp
 
@@ -121,9 +131,7 @@ def build_parameters(plants, fuel, demand, profile):
     HOURS = [int(h) for h in demand["Hour"]]
 
     # --- fuel prices ---
-    # fuel.csv labels its key column "Technology" but the values (Coal, Gas,
-    # Diesel, Uranium, Hydrogen) are fuels, so we join on the plants' Fuel
-    # column. Anything not listed - notably Solar's fuel of "None" - is free.
+    #Anything not listed is free.
     fuel_price = dict(zip(fuel["Technology"], fuel["Fuel Price ($/MWhTh)"].astype(float)))
 
     def price_of(fuel_name):
@@ -155,24 +163,38 @@ def build_parameters(plants, fuel, demand, profile):
         if efficiency[p] <= 0:
             raise ValueError("Plant {} has a non-positive efficiency".format(p))
 
-        # marginal cost = fuel cost / efficiency + variable O&M
+        # marginal cost = fuel cost / efficiency + VOM
         marginal_cost[p] = price_of(row["Fuel"]) / efficiency[p] + vom[p]
 
     # --- availability: nameplate capacity, scaled by an hourly resource
     # profile for the technologies that have one ---
+    #
+    # Built as a single (n_plants, n_hours) array. Rows for plants without a
+    # profile stay at a factor of 1.0, i.e. available at nameplate around the
+    # clock. The dict-of-dicts view is derived from the array below.
     profile_factors = build_profile_factors(profile, technology, HOURS)
-    availability = {}
-    for p in PLANTS:
+
+    cap_vec = np.array([capacity[p] for p in PLANTS], dtype=float)
+    mc_vec = np.array([marginal_cost[p] for p in PLANTS], dtype=float)
+    profiled_mask = np.array([p in profile_factors for p in PLANTS], dtype=bool)
+
+    factors_matrix = np.ones((len(PLANTS), len(HOURS)), dtype=float)
+    for i, p in enumerate(PLANTS):
         factors = profile_factors.get(p)
-        if factors is None:
-            # Thermal plant: assumed available at nameplate around the clock.
-            availability[p] = {t: capacity[p] for t in HOURS}
-        else:
-            availability[p] = {t: capacity[p] * factors[t] for t in HOURS}
+        if factors is not None:
+            factors_matrix[i] = [factors[t] for t in HOURS]
+
+    avail = cap_vec[:, None] * factors_matrix
+
+    # Legacy dict-of-dicts view, derived from `avail` so the two agree by
+    # construction.
+    availability = {p: dict(zip(HOURS, avail[i]))
+                    for i, p in enumerate(PLANTS)}
 
     # --- demand ---
     demand_col = [c for c in demand.columns if c.lower().startswith("demand")][0]
-    demand_by_hour = dict(zip(HOURS, demand[demand_col].astype(float)))
+    demand_vec = demand[demand_col].astype(float).to_numpy()
+    demand_by_hour = dict(zip(HOURS, demand_vec))
 
     return {
         "PLANTS": PLANTS,
@@ -186,6 +208,12 @@ def build_parameters(plants, fuel, demand, profile):
         "availability": availability,
         "profiled": set(profile_factors),
         "demand": demand_by_hour,
+        # Array views, see "Array layout" in the module docstring.
+        "avail": avail,
+        "cap_vec": cap_vec,
+        "mc_vec": mc_vec,
+        "demand_vec": demand_vec,
+        "profiled_mask": profiled_mask,
     }
 
 
@@ -268,12 +296,9 @@ def check_feasibility(par):
             "Demand exceeds available capacity in {} of {} hour(s). "
             "First is hour {}: demand {:.2f} MWh vs {:.2f} MW available. "
             "Worst is hour {}, short by {:.2f} MW. "
-            "Note that wind and solar are limited by their hourly profiles, "
-            "so firm capacity is what matters at peak."
             .format(len(short), len(par["HOURS"]), t, d, a,
                     worst[0], worst[1] - worst[2])
         )
-
 
 # --------------------------------------------------------------------------
 # Steps 4 to 7 - build and solve the LP
@@ -335,59 +360,66 @@ def build_results(par, prob, gen):
     """Assemble the hourly results table, including the clearing price."""
 
     PLANTS, HOURS = par["PLANTS"], par["HOURS"]
-    mc = par["marginal_cost"]
+    avail, mc_vec, demand_vec = par["avail"], par["mc_vec"], par["demand_vec"]
 
-    rows = []
-    mismatches = 0
+    # Pull the solution out of the solver once, into a (n_plants, n_hours)
+    # array laid out the same way as `avail`. Everything below is then plain
+    # array arithmetic. `or 0.0` guards against a None from an unused
+    # variable.
+    output = np.array(
+        [[gen[p][t].value() or 0.0 for t in HOURS] for p in PLANTS],
+        dtype=float)
 
+    # Clearing price, method 1: merit order. The most expensive plant actually
+    # generating sets the price. Non-running plants are masked to -inf rather
+    # than 0 so that a negative marginal cost could still set the price; hours
+    # with nothing running fall back to 0.0.
+    running = output > TOL
+    masked_mc = np.where(running, mc_vec[:, None], -np.inf)
+    price_merit = np.where(running.any(axis=0), masked_mc.max(axis=0), 0.0)
+
+    # Clearing price, method 2: the dual of the energy balance constraint.
+    # Still a per-hour loop, because these are PuLP constraint objects.
+    price_dual = []
     for t in HOURS:
-        row = {"Hour": t, "Demand (MWh)": par["demand"][t]}
-
-        output = {p: (gen[p][t].value() or 0.0) for p in PLANTS}
-        for p in PLANTS:
-            row["{} (MWh)".format(p)] = output[p]
-
-        # Availability is written out as well as generation, because a
-        # profiled plant sitting at its resource limit is at capacity even
-        # though it is far below nameplate. Anything reading these results
-        # needs the hourly limit to tell "maxed out" from "part loaded".
-        for p in PLANTS:
-            row["{} Available (MWh)".format(p)] = par["availability"][p][t]
-
-        # Clearing price, method 1: merit order. The most expensive plant
-        # actually generating sets the price.
-        running = [p for p in PLANTS if output[p] > TOL]
-        price_merit = max((mc[p] for p in running), default=0.0)
-
-        # Clearing price, method 2: the dual of the energy balance constraint.
         constraint = prob.constraints.get("balance_{}".format(t))
-        price_dual = constraint.pi if constraint is not None and constraint.pi is not None else None
+        price_dual.append(
+            constraint.pi if constraint is not None and constraint.pi is not None else None)
 
-        # These agree except in degenerate hours where a plant sits exactly on
-        # its cap. Report the merit-order value as briefed, but flag any gap.
-        if price_dual is not None and abs(price_dual - price_merit) > 1e-4:
-            mismatches += 1
+    # These agree except in degenerate hours where a plant sits exactly on its
+    # cap. Report the merit-order value as briefed, but flag any gap.
+    mismatches = sum(
+        1 for d, m in zip(price_dual, price_merit)
+        if d is not None and abs(d - m) > 1e-4)
 
-        row["Clearing Price ($/MWh)"] = price_merit
-        row["Shadow Price ($/MWh)"] = price_dual
-        row["Production Cost ($)"] = sum(mc[p] * output[p] for p in PLANTS)
-        row["Market Cost ($)"] = price_merit * par["demand"][t]
+    # Curtailment: profiled renewable energy that was available but not taken,
+    # because demand was already met by cheaper or equal output.
+    curtailed = np.maximum(0.0, avail - output)[par["profiled_mask"]].sum(axis=0)
 
-        # Curtailment: profiled renewable energy that was available but not
-        # taken, because demand was already met by cheaper or equal output.
-        curtailed = 0.0
-        for p in par["profiled"]:
-            curtailed += max(0.0, par["availability"][p][t] - output[p])
-        row["Curtailment (MWh)"] = curtailed
-
-        rows.append(row)
+    # Column order here is the column order of the CSV, so keep the generation
+    # block ahead of the availability block. Availability is written out as
+    # well as generation, because a profiled plant sitting at its resource
+    # limit is at capacity even though it is far below nameplate. Anything
+    # reading these results needs the hourly limit to tell "maxed out" from
+    # "part loaded".
+    columns = {"Hour": HOURS, "Demand (MWh)": demand_vec}
+    for i, p in enumerate(PLANTS):
+        columns["{} (MWh)".format(p)] = output[i]
+    for i, p in enumerate(PLANTS):
+        columns["{} Available (MWh)".format(p)] = avail[i]
+    columns["Clearing Price ($/MWh)"] = price_merit
+    columns["Shadow Price ($/MWh)"] = price_dual
+    columns["Production Cost ($)"] = mc_vec @ output
+    columns["Market Cost ($)"] = price_merit * demand_vec
+    columns["Curtailment (MWh)"] = curtailed
 
     if mismatches:
         print("  note: merit-order and shadow prices differ in {} of {} hours "
               "(expected in degenerate hours where a plant sits exactly on its cap)\n"
               .format(mismatches, len(HOURS)))
 
-    return pd.DataFrame(rows)
+    return pd.DataFrame(columns)
+
 
 
 def build_summary(par, results):
