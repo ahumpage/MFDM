@@ -8,12 +8,15 @@ numbers differ from last week's, was that the code or the inputs?
 
 Layout
 ------
-    runs/
+    run_archive/
         _store/<sha256-16>.csv          deduped input blobs
         <run id>/
             manifest.json
             dispatch_results.csv
             plant_summary.csv
+
+Live files are read from and written back to inputs/ and results/ at the repo
+root; the archive itself only ever writes inside run_archive/.
 
 Inputs are content addressed, so an unchanged profiles.csv is stored once no
 matter how many runs reference it. Outputs are kept as plain files in the run
@@ -37,12 +40,27 @@ import pandas as pd
 
 
 BASE_DIR = Path(__file__).resolve().parent
-RUNS_DIR = BASE_DIR / "runs"
+REPO_ROOT = BASE_DIR.parent
+
+# Where the live files live. The model reads inputs/ and writes results/.
+INPUTS_DIR = REPO_ROOT / "inputs"
+RESULTS_DIR = REPO_ROOT / "results"
+
+# Archived runs sit directly in run_archive/, alongside this module.
+RUNS_DIR = BASE_DIR
 STORE_DIR = RUNS_DIR / "_store"
 
 INPUT_FILES = ["plants.csv", "fuel.csv", "demand.csv", "profiles.csv"]
 OUTPUT_FILES = ["dispatch_results.csv", "plant_summary.csv"]
-CODE_FILES = ["MFDM.py", "dashboard.py", "runstore.py", "runs.py"]
+
+# Paths relative to the repo root. The manifest keys off the bare file name so
+# that runs archived before the code moved into subfolders stay comparable.
+CODE_FILES = [
+    "model/MFDM.py",
+    "dashboard/dashboard.py",
+    "run_archive/runstore.py",
+    "run_archive/runs.py",
+]
 
 # Inputs small enough that a cell by cell diff is readable and useful.
 SMALL_INPUTS = {"plants.csv", "fuel.csv"}
@@ -103,6 +121,15 @@ def git_state():
         "branch": _git(["rev-parse", "--abbrev-ref", "HEAD"]),
         "dirty": bool(status),
     }
+
+
+def live_path(name):
+    """Where a live input or output file currently sits.
+
+    Inputs and outputs used to share one folder; they now live in inputs/ and
+    results/, so every read of a live file goes through here.
+    """
+    return (INPUTS_DIR if name in INPUT_FILES else RESULTS_DIR) / name
 
 
 def _ensure_dirs():
@@ -181,17 +208,15 @@ def compute_kpis(results, summary):
 # Archiving
 # --------------------------------------------------------------------------
 
-def archive_run(label=None, notes=None, solver_status=None, seconds=None,
-                base_dir=None):
+def archive_run(label=None, notes=None, solver_status=None, seconds=None):
     """Snapshot the current inputs and results as a new run.
 
-    Reads the files sitting in the working folder, so it must be called after
+    Reads the live files from inputs/ and results/, so it must be called after
     the results have been written.
     """
-    base = Path(base_dir) if base_dir else BASE_DIR
     _ensure_dirs()
 
-    missing = [f for f in INPUT_FILES + OUTPUT_FILES if not (base / f).exists()]
+    missing = [f for f in INPUT_FILES + OUTPUT_FILES if not live_path(f).exists()]
     if missing:
         raise FileNotFoundError(
             "Cannot archive, missing: {}".format(", ".join(missing)))
@@ -213,22 +238,22 @@ def archive_run(label=None, notes=None, solver_status=None, seconds=None,
 
     inputs = {}
     for name in INPUT_FILES:
-        digest, size = store_blob(base / name)
+        digest, size = store_blob(live_path(name))
         inputs[name] = {"hash": digest, "size": size}
 
     for name in OUTPUT_FILES:
-        shutil.copy2(str(base / name), str(run_dir / name))
+        shutil.copy2(str(live_path(name)), str(run_dir / name))
 
     results = pd.read_csv(run_dir / "dispatch_results.csv")
     summary = pd.read_csv(run_dir / "plant_summary.csv", keep_default_na=False)
 
     code = {}
     for name in CODE_FILES:
-        # Always hashed from where the modules actually live, not from
-        # base_dir, which may be a scratch folder holding only data.
-        path = BASE_DIR / name
+        # Always hashed from where the modules actually live in the repo, and
+        # keyed by bare file name so manifests stay comparable across the move.
+        path = REPO_ROOT / name
         if path.exists():
-            code[name] = sha256_file(path)
+            code[Path(name).name] = sha256_file(path)
 
     manifest = {
         "id": run_id,
@@ -331,7 +356,7 @@ def load_input(run_id, name):
 # Restore
 # --------------------------------------------------------------------------
 
-def check_writable(base_dir=None, names=None):
+def check_writable(names=None):
     """Names of files that exist but cannot currently be written.
 
     Worth checking before a restore: these CSVs are routinely open in Excel,
@@ -339,10 +364,9 @@ def check_writable(base_dir=None, names=None):
     files, hit a lock on the third and leave an inconsistent input set that
     matches no run at all.
     """
-    base = Path(base_dir) if base_dir else BASE_DIR
     blocked = []
     for name in (names or INPUT_FILES):
-        path = base / name
+        path = live_path(name)
         if not path.exists():
             continue
         try:
@@ -353,18 +377,17 @@ def check_writable(base_dir=None, names=None):
     return blocked
 
 
-def restore(run_ref, base_dir=None, snapshot_first=True):
-    """Copy an archived run's inputs back into the working folder.
+def restore(run_ref, snapshot_first=True):
+    """Copy an archived run's inputs back into inputs/.
 
     This overwrites the live input CSVs, so unless snapshot_first is turned
     off the current state is archived first and its id returned alongside.
     """
-    base = Path(base_dir) if base_dir else BASE_DIR
     run_id = resolve(run_ref)
     manifest = get_manifest(run_id)
 
     # Fail before touching anything rather than part way through.
-    blocked = check_writable(base)
+    blocked = check_writable()
     if blocked:
         raise IOError(
             "Cannot restore: {} {} locked by another program (Excel keeps CSVs "
@@ -374,16 +397,15 @@ def restore(run_ref, base_dir=None, snapshot_first=True):
     safety = None
     if snapshot_first:
         # Only possible if a full set of files is present to snapshot.
-        have_all = all((base / f).exists() for f in INPUT_FILES + OUTPUT_FILES)
+        have_all = all(live_path(f).exists() for f in INPUT_FILES + OUTPUT_FILES)
         if have_all:
             safety = archive_run(label=SAFETY_LABEL,
-                                 notes="Automatic snapshot before restoring {}".format(run_id),
-                                 base_dir=base)
+                                 notes="Automatic snapshot before restoring {}".format(run_id))
 
     restored = []
     for name in INPUT_FILES:
         src = load_input(run_id, name)
-        shutil.copy2(str(src), str(base / name))
+        shutil.copy2(str(src), str(live_path(name)))
         restored.append(name)
 
     return {
