@@ -2,11 +2,12 @@
 Dispatch Model Dashboard
 ========================
 
-An interactive Dash app for exploring the output of MFDM.py.
+An interactive Dash app for exploring the output of model/MFDM.py.
 
-Run MFDM.py first to produce dispatch_results.csv and plant_summary.csv, then:
+Run model/MFDM.py first to produce dispatch_results.csv and plant_summary.csv
+in results/, then:
 
-    python dashboard.py
+    python dashboard/dashboard.py
 
 and open http://127.0.0.1:8050 in a browser.
 
@@ -28,6 +29,9 @@ import pandas as pd
 import plotly.graph_objects as go
 from dash import Dash, dcc, html, Input, Output, State, callback_context, dash_table
 
+# runstore lives in run_archive/, which is a sibling folder rather than a
+# package, so it has to be put on the import path before importing it.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "run_archive"))
 import runstore
 
 
@@ -35,9 +39,13 @@ import runstore
 # Configuration
 # --------------------------------------------------------------------------
 
-DATA_DIR = Path(__file__).resolve().parent
-RESULTS_FILE = DATA_DIR / "dispatch_results.csv"
-SUMMARY_FILE = DATA_DIR / "plant_summary.csv"
+BASE_DIR = Path(__file__).resolve().parent          # dashboard/
+REPO_ROOT = BASE_DIR.parent
+
+# The live results the model most recently wrote.
+RESULTS_DIR = REPO_ROOT / "results"
+RESULTS_FILE = RESULTS_DIR / "dispatch_results.csv"
+SUMMARY_FILE = RESULTS_DIR / "plant_summary.csv"
 
 # Consistent colour per technology across every chart. Moved here from
 # MFDM.py, which is now purely a solver.
@@ -178,7 +186,7 @@ def load_current():
     if missing:
         raise SystemExit(
             "ERROR: missing {}.\n"
-            "Run MFDM.py first to generate dispatch_results.csv and "
+            "Run model/MFDM.py first to generate dispatch_results.csv and "
             "plant_summary.csv.".format(" and ".join(missing))
         )
     return Run(CURRENT_ID, None,

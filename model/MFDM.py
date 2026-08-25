@@ -31,8 +31,9 @@ After solving, the hourly market clearing price is taken as the marginal cost
 of the most expensive plant running in that hour, and is cross-checked against
 the dual (shadow price) of the energy balance constraint.
 
-Outputs two CSVs, dispatch_results.csv and plant_summary.csv. Run dashboard.py
-afterwards to explore the results interactively.
+Reads the four CSVs in inputs/ and writes dispatch_results.csv and
+plant_summary.csv into results/. Run dashboard/dashboard.py afterwards to
+explore the results interactively.
 
 Array layout
     Hourly quantities are held as numpy arrays of shape (n_plants, n_hours),
@@ -53,6 +54,9 @@ import numpy as np
 import pandas as pd
 import pulp
 
+# runstore lives in run_archive/, which is a sibling folder rather than a
+# package, so it has to be put on the import path before importing it.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "run_archive"))
 import runstore
 
 
@@ -60,12 +64,18 @@ import runstore
 # Configuration
 # --------------------------------------------------------------------------
 
-DATA_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent          # model/
+REPO_ROOT = BASE_DIR.parent
 
-PLANTS_FILE = DATA_DIR / "plants.csv"
-FUEL_FILE = DATA_DIR / "fuel.csv"
-DEMAND_FILE = DATA_DIR / "demand.csv"
-PROFILE_FILE = DATA_DIR / "profiles.csv"
+# Inputs are read from inputs/ and results are written to results/, both at
+# the repo root, so the model folder holds only code.
+INPUTS_DIR = REPO_ROOT / "inputs"
+RESULTS_DIR = REPO_ROOT / "results"
+
+PLANTS_FILE = INPUTS_DIR / "plants.csv"
+FUEL_FILE = INPUTS_DIR / "fuel.csv"
+DEMAND_FILE = INPUTS_DIR / "demand.csv"
+PROFILE_FILE = INPUTS_DIR / "profiles.csv"
 
 
 # Generation below this is treated as "not running" when finding the marginal
@@ -594,8 +604,9 @@ def main(argv=None):
     results = build_results(par, prob, gen)
     summary = build_summary(par, results)
 
-    results_path = DATA_DIR / "dispatch_results.csv"
-    summary_path = DATA_DIR / "plant_summary.csv"
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    results_path = RESULTS_DIR / "dispatch_results.csv"
+    summary_path = RESULTS_DIR / "plant_summary.csv"
     results.round(6).to_csv(results_path, index=False)
     summary.round(6).to_csv(summary_path, index=False)
     print("Results written:\n  {}\n  {}\n".format(results_path, summary_path))
@@ -610,7 +621,7 @@ def main(argv=None):
             git = manifest["git"]
             print("Archived as run: {}".format(manifest["id"]))
             if git.get("short"):
-                print("  git {}{}   compare with:  python runs.py diff {} latest\n"
+                print("  git {}{}   compare with:  python run_archive/runs.py diff {} latest\n"
                       .format(git["short"],
                               " (dirty)" if git.get("dirty") else "",
                               manifest["id"]))
