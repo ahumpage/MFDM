@@ -1,29 +1,30 @@
-#My first Dispatch Model
+# My first Dispatch Model
 
 This repo provides the power market model and dashboard for the my first dispatch model onboarding.
-It's purpose is to create a python PuLP linear optimisation model which determines the cheapest way to dispatch a set of power planets to meet electricity demand over a set of time periods. 
+Its purpose is to create a python PuLP linear optimisation model which determines the cheapest way to dispatch a set of power plants to meet electricity demand over a set of time periods.
 
 It is made up of the following:
-##Sets: 
+
+## Sets
 Power plants (P)
 Time (T)
 Fuel
 
-##Parameters:
+## Parameters
 Psupp(P,T) - how much each plant can supply MWh
 Pcost(P,T) - Cost to produce 1 MWh of electricity $/MWh
 Efficiency(P) - efficiency MWh/MWhTh
 
-Pcost(P,T) = (fuel cost)/(efficiency) +VOM  
+Pcost(P,T) = (fuel cost)/(efficiency) +VOM
 
-##Decision variable:
+## Decision variable
 Which powerplants to dispatch
 
-##Objective function
+## Objective function
 Minimise the market cost of electricity while meeting demand
 Obj = sum(Pcostmax(T)*demand(T))
 
-##constraints
+## Constraints
 Demand = supply
 Each plant has a capacity
 Pcostmax(T) = Pcost(P,T) minimimum required to meet demand
