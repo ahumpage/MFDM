@@ -15,3 +15,17 @@ Run model/MFDM.py first, then dashboard/dashboard.py, which reads the CSVs in re
 Runs that are not the most up to date are archived by run_archive/runstore.py into a
 timestamped folder under run_archive/, each with a manifest.json recording the git commit
 and input hashes. The archive is kept in the repo so past runs stay usable on this machine.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues for `ahumpage/MFDM`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical triage roles, used as-is. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.

@@ -387,7 +387,13 @@ def fig_dispatch(run, agg, plants, overlays, resolution):
     # price only to $41.60, so they cannot share an axis meaningfully.
     y2label = None
     if "price" in overlays:
-        shape = "hv" if resolution == "hourly" else "linear"
+        # "hvh" rather than "hv": the step must be centred on the hour so it
+        # lines up with the bar for that hour. A bar at x spans x-0.5 to x+0.5
+        # (bargap=0), so the price riser has to sit on the bar edge at x+0.5,
+        # which is where "hvh" puts it. "hv" starts the run at x instead, so
+        # every price segment sat half a bar to the right of the hour it
+        # describes.
+        shape = "hvh" if resolution == "hourly" else "linear"
         price_name = ("Clearing price" if resolution == "hourly"
                       else "Load-weighted avg price")
         fig.add_trace(go.Scatter(
@@ -410,8 +416,9 @@ def fig_price(run, agg, overlays, resolution):
 
     fig = go.Figure()
     # Price is piecewise constant at hourly resolution, so draw it as a step.
+    # "hvh" centres each flat run on its hour, matching the dispatch bars.
     # Once averaged it is no longer a step function, so use a plain line.
-    shape = "hv" if resolution == "hourly" else "linear"
+    shape = "hvh" if resolution == "hourly" else "linear"
 
     fig.add_trace(go.Scatter(
         x=agg["x"], y=agg[PRICE_COL],
@@ -1309,7 +1316,9 @@ def fig_compare_price(a, b, lo, hi, resolution):
     if agg_a.empty or agg_b.empty:
         return empty_figure("No overlapping hours to compare")
 
-    shape = "hv" if resolution == "hourly" else "linear"
+    # "hvh" to match the step convention used elsewhere: each flat run is
+    # centred on its hour.
+    shape = "hvh" if resolution == "hourly" else "linear"
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=agg_a["x"], y=agg_a[PRICE_COL], name="A price",
                              mode="lines",
