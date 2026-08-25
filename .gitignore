@@ -6,3 +6,4 @@ __pycache__/
 # Run archive: a local experiment log. Each manifest records the git commit
 # it was produced from, so provenance survives without committing results.
 runs/
+.agents/
