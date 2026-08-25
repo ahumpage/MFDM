@@ -1,0 +1,117 @@
+{
+  "id": "20260824T154258",
+  "created": "2026-08-24T15:42:58",
+  "label": null,
+  "notes": null,
+  "git": {
+    "commit": "a3364e84738602a0480233c1ee1f749a19e30d93",
+    "short": "a3364e8",
+    "branch": "main",
+    "dirty": true
+  },
+  "code": {
+    "MFDM.py": "b47739ca2d83a556",
+    "dashboard.py": "27ac24962f9d84a9",
+    "runstore.py": "d9554a96af1beb31",
+    "runs.py": "2d46934a14eae845"
+  },
+  "inputs": {
+    "plants.csv": {
+      "hash": "0f4b256287236146",
+      "size": 244
+    },
+    "fuel.csv": {
+      "hash": "71fa218d97b91dbd",
+      "size": 97
+    },
+    "demand.csv": {
+      "hash": "ca28492e3895f380",
+      "size": 12412
+    },
+    "profiles.csv": {
+      "hash": "95849d124d72aafa",
+      "size": 9220
+    }
+  },
+  "outputs": {
+    "dispatch_results.csv": "e5ecb19dd332bbfe",
+    "plant_summary.csv": "2878638e9692dff2"
+  },
+  "solver": {
+    "status": "Optimal",
+    "seconds": 0.171
+  },
+  "kpis": {
+    "hours": 744,
+    "energy_served_mwh": 461279.447689,
+    "energy_generated_mwh": 461279.44759999996,
+    "production_cost": 10708480.250273,
+    "market_cost": 18994116.253319997,
+    "avg_production_cost": 23.214735241126075,
+    "time_weighted_price": 41.11532258064517,
+    "load_weighted_price": 41.17702695942797,
+    "producer_surplus": 8285636.003046997,
+    "renewable_used_mwh": 174465.02338,
+    "renewable_available_mwh": 174530.0,
+    "renewable_share_pct": 37.82198063539704,
+    "curtailed_mwh": 64.97662,
+    "curtailment_pct": 0.037229484902309054,
+    "plants": [
+      {
+        "plant": "Plant 1",
+        "technology": "Solar",
+        "capacity_mw": 500.0,
+        "profiled": true,
+        "marginal_cost": 1.0,
+        "generation_mwh": 92225.0,
+        "capacity_factor_pct": 24.791667,
+        "hours_running": 403,
+        "hours_setting_price": 0
+      },
+      {
+        "plant": "Plant 2",
+        "technology": "Wind",
+        "capacity_mw": 300.0,
+        "profiled": true,
+        "marginal_cost": 2.0,
+        "generation_mwh": 82240.02338,
+        "capacity_factor_pct": 36.845889,
+        "hours_running": 744,
+        "hours_setting_price": 2
+      },
+      {
+        "plant": "Plant 3",
+        "technology": "Coal",
+        "capacity_mw": 100.0,
+        "profiled": false,
+        "marginal_cost": 21.5,
+        "generation_mwh": 73617.15642,
+        "capacity_factor_pct": 98.947791,
+        "hours_running": 742,
+        "hours_setting_price": 14
+      },
+      {
+        "plant": "Plant 4",
+        "technology": "Gas",
+        "capacity_mw": 600.0,
+        "profiled": false,
+        "marginal_cost": 41.6,
+        "generation_mwh": 213197.2678,
+        "capacity_factor_pct": 47.759245,
+        "hours_running": 728,
+        "hours_setting_price": 728
+      },
+      {
+        "plant": "Plant 5",
+        "technology": "Gas",
+        "capacity_mw": 1000.0,
+        "profiled": false,
+        "marginal_cost": 76.0,
+        "generation_mwh": 0.0,
+        "capacity_factor_pct": 0.0,
+        "hours_running": 0,
+        "hours_setting_price": 0
+      }
+    ]
+  }
+}

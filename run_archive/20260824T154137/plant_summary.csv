@@ -1,0 +1,6 @@
+Plant,Technology,Fuel,Capacity (MW),Profiled,Marginal Cost ($/MWh),Total Generation (MWh),Available Energy (MWh),Curtailed (MWh),Curtailment (%),Share of Demand (%),Capacity Factor (%),Availability Factor (%),Hours Running,Hours Setting Price,Production Cost ($)
+Plant 1,Solar,None,600.0,True,1.0,110605.02338,110670.0,64.97662,0.058712,23.977878,24.777111,24.791667,403,2,110605.02338
+Plant 2,Wind,None,400.0,True,2.0,108735.102477,109740.0,1004.897523,0.915708,23.572501,36.537333,36.875,742,16,217470.204954
+Plant 3,Coal,Coal,300.0,False,21.5,188276.345244,223200.0,0.0,0.0,40.816114,84.353201,100.0,726,287,4047941.422746
+Plant 4,Gas,Gas,400.0,False,41.6,53662.976553,297600.0,0.0,0.0,11.633507,18.031914,100.0,439,439,2232379.824596
+Plant 5,Gas,Gas,1000.0,False,76.0,0.0,744000.0,0.0,0.0,0.0,0.0,100.0,0,0,0.0

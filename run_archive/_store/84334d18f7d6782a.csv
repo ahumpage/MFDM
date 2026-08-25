@@ -1,0 +1,6 @@
+﻿Plant,Technology,Fuel,Capacity (MW),Efficiency (MWh/MWhTh),VOM ($/MWh),Ramptime (hrs)
+Plant 1,Solar,None,1000,1,1,0
+Plant 2,Wind,None,300,1,2,0
+Plant 3,Coal,Coal,100,0.4,2,0.5
+Plant 4,Gas,Gas,600,0.5,2,1
+Plant 5,Gas,Gas,1000,0.3,10,0.2
