@@ -83,6 +83,7 @@ PRICE_COL = "Clearing Price ($/MWh)"
 SHADOW_COL = "Shadow Price ($/MWh)"
 PROD_COST_COL = "Production Cost ($)"
 MARKET_COST_COL = "Market Cost ($)"
+UNSERVED_COL = "Unserved Energy (MWh)"
 
 HOURS_PER_DAY = 24
 HOURS_PER_WEEK = 168
@@ -577,6 +578,11 @@ def fig_energy_mix(run, hourly, plants):
 # the model rather than at the data. These identities hold exactly for the
 # current model; they start to bind once minimum generation levels, ramp
 # rates, unit commitment or storage are added.
+#
+# One thing generating in an hour is not a plant: unserved energy, priced at
+# VoLL. In an hour with a shortfall it is the marginal unit and sets the
+# price, so every plant should be at capacity and the price will match no
+# plant's marginal cost. That is correct, not unexplained.
 
 QA_TOL = 1e-4          # $/MWh and MWh tolerance for declaring a violation
 MAX_VIOLATION_ROWS = 100
@@ -620,8 +626,16 @@ def run_qa(run, hourly):
         out["price_mismatch"] = int((diff > QA_TOL).sum())
 
     # --- check 3: does every price correspond to some plant? ---
+    # Except in an hour with unserved energy, where the marginal MWh is not
+    # supplied by any plant but shed, and lost load sets the price at VoLL.
+    # Those hours are detected from the data rather than by comparing against
+    # a hardcoded VoLL, so the figure cannot drift from the model's constant.
     mcs = [round(run.meta[p]["marginal_cost"], 6) for p in run.plant_order]
-    out["unexplained_price"] = int((~price.round(6).isin(mcs)).sum())
+    if UNSERVED_COL in hourly.columns:
+        scarce = hourly[UNSERVED_COL] > QA_TOL
+    else:
+        scarce = pd.Series(False, index=hourly.index)
+    out["unexplained_price"] = int((~price.round(6).isin(mcs) & ~scarce).sum())
 
     # --- check 2: per plant-hour optimality conditions ---
     for p in run.plant_order:

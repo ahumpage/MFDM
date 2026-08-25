@@ -263,8 +263,7 @@ def build_profile_factors(profile, technology, HOURS):
             "profiles.csv is missing {} of the {} hours in demand.csv "
             "(first missing: hour {}).".format(len(missing), len(HOURS), missing[0]))
 
-    # Restrict to the modelled hours. profiles.csv covers a full year (8784
-    # hours) while demand.csv may cover only part of it.
+    # Restrict profileto the modelled hours
     idx = profile[hour_col].astype(int)
     sub = profile.set_index(idx).loc[HOURS]
 
@@ -298,9 +297,7 @@ def build_profile_factors(profile, technology, HOURS):
 
 
 def check_demand(par):
-    """Flag suspicious demand values. These are not fatal, but a zero in the
-    middle of an otherwise continuous series is usually a data entry slip
-    rather than a real hour of no demand."""
+    "Flag suspicious demand values"
     zeros = [t for t in par["HOURS"] if par["demand"][t] <= 0.0]
     if zeros:
         shown = ", ".join(str(t) for t in zeros[:10])
@@ -312,13 +309,7 @@ def check_demand(par):
 
 
 def check_capacity_adequacy(par):
-    """Warn before solving if demand exceeds everything the fleet can offer.
-
-    This is not fatal: the LP prices the shortfall at VOLL rather than failing.
-    It is a forecast of what the solve is about to find, given early because a
-    capacity gap is nearly always a data problem, and it is easier to spot here
-    than in a column of numbers afterwards.
-    """
+    "Warn before solving if demand exceeds everything the fleet can offer"
     short = []
     for t in par["HOURS"]:
         total = sum(par["availability"][p][t] for p in par["PLANTS"])
@@ -342,7 +333,7 @@ def check_capacity_adequacy(par):
 # --------------------------------------------------------------------------
 
 def build_and_solve(par):
-    """Build the dispatch LP, solve it, and return the model and variables."""
+    "Build the dispatch LP, solve it, and return the model and variables."
 
     PLANTS, HOURS = par["PLANTS"], par["HOURS"]
 
@@ -530,6 +521,147 @@ def build_summary(par, results):
 
 
 # --------------------------------------------------------------------------
+# Step 8b - the merit order check
+# --------------------------------------------------------------------------
+
+def dispatch_ceiling(par, output):
+    """The most each plant could have generated in each hour.
+
+    Returns a (n_plants, n_hours) array laid out like `avail`.
+
+    Today a plant's ceiling is simply its hourly availability, so this returns
+    `avail` untouched and ignores `output`. It exists as a function anyway
+    because it is the one place that changes when ramp rates arrive: a plant's
+    real ceiling then becomes the lower of its availability and the most it
+    could reach from last hour's output,
+
+        np.minimum(par["avail"], previous_output + ramp_up_rate)
+
+    which is why `output` is already an argument. check_merit_order below is
+    written against this ceiling and never mentions availability, so it needs
+    no changes when that happens.
+
+    A boundary worth knowing about in advance: this handles ramping *up*.
+    A ramp-*down* limit is different in kind, because it puts a floor under a
+    plant rather than a ceiling over it, and a floor can make a genuinely
+    optimal dispatch look like a merit order violation. A cheap plant may hold
+    back in one hour so that it can drop to a low demand in the next without
+    being stranded above it. When ramp-down limits are added, the check below
+    stops being a proof of a bug and becomes a prompt to go and look.
+    """
+    return par["avail"]
+
+
+def check_merit_order(par, results):
+    """Assert that the dispatch respects merit order, hour by hour.
+
+    The invariant: in any hour, no plant may generate strictly below its
+    dispatch ceiling while something strictly more expensive is generating.
+    Put the other way round, cheap headroom must never be left unused above a
+    running expensive plant.
+
+    Stating it against the ceiling rather than against nameplate is what makes
+    it checkable. A solar farm at its midday resource limit is not skipping
+    its turn in the merit order, it is exhausted, and judging it against
+    nameplate would report it as a violation in every sunny hour.
+
+    "Something strictly more expensive" includes unserved energy, which at
+    VOLL is the most expensive thing in the stack. So in an hour with a
+    shortfall the invariant demands that every plant be at its ceiling, which
+    is exactly right: load should never be shed while any headroom remains.
+    Unserved energy only ever appears on the expensive side of the comparison,
+    never as the underused cheap side, because nothing is priced above it.
+
+    Equal-cost plants are not asserted about. Two plants on the same marginal
+    cost may split output however the solver likes, and the strict comparison
+    below simply never fires between them.
+    """
+    PLANTS, HOURS = par["PLANTS"], par["HOURS"]
+    mc_vec = par["mc_vec"]
+
+    # Rebuild the (n_plants, n_hours) arrays from the results table, so the
+    # check is run against the numbers that were actually written out.
+    output = np.array(
+        [results["{} (MWh)".format(p)].to_numpy(dtype=float) for p in PLANTS])
+    unserved_vec = results["Unserved Energy (MWh)"].to_numpy(dtype=float)
+
+    ceiling = dispatch_ceiling(par, output)
+
+    # The comparator: the marginal cost of the most expensive thing generating
+    # in each hour. Deliberately recomputed here rather than read from the
+    # Clearing Price column, for two reasons. That column falls back to 0.0 in
+    # an hour with nothing running, which would make a plant with a negative
+    # marginal cost look undercut by a price that no one is actually offering.
+    # Using -inf instead makes the invariant vacuously true when nothing is
+    # running, which is what it should be. It also keeps this check
+    # independent of any later decision about what price to display.
+    running = output > TOL
+    masked_mc = np.where(running, mc_vec[:, None], -np.inf)
+    most_expensive = np.where(running.any(axis=0), masked_mc.max(axis=0), -np.inf)
+    comparator = np.where(unserved_vec > TOL, VOLL, most_expensive)
+
+    undercut = mc_vec[:, None] < comparator - TOL     # something dearer is on
+    underused = output < ceiling - TOL                # and this plant has room
+    violations = undercut & underused
+
+    if not violations.any():
+        return
+
+    headroom = ceiling - output
+    # What the violation cost: every MWh of cheap headroom left unused had to
+    # be covered by something dearer, at the difference in price.
+    wasted = float((headroom * (comparator - mc_vec[:, None]))[violations].sum())
+
+    rows = []
+    for i, t_index in zip(*np.nonzero(violations)):
+        rows.append({
+            "hour": HOURS[t_index],
+            "plant": PLANTS[i],
+            "mc": mc_vec[i],
+            "gen": output[i, t_index],
+            "ceiling": ceiling[i, t_index],
+            "headroom": headroom[i, t_index],
+            "above": describe_price_setter(par, comparator[t_index]),
+        })
+    rows.sort(key=lambda r: (r["hour"], r["plant"]))
+    worst = max(rows, key=lambda r: r["headroom"])
+    n_hours_affected = len(set(r["hour"] for r in rows))
+
+    lines = [
+        "Merit order violated in {} plant-hour(s) across {} hour(s). A plant "
+        "generated below its ceiling while something more expensive was "
+        "running, so this dispatch is not least cost.".format(
+            len(rows), n_hours_affected),
+        "Cost of the violation: ${:,.2f}.".format(wasted),
+        "",
+    ]
+    for r in rows[:10]:
+        lines.append(
+            "  hour {:>5}   {:<10} ${:>8.2f}/MWh   generated {:>9,.2f} of "
+            "{:>9,.2f} MWh   ({:,.2f} MWh spare)   while {} was running"
+            .format(r["hour"], r["plant"], r["mc"], r["gen"], r["ceiling"],
+                    r["headroom"], r["above"]))
+    if len(rows) > 10:
+        lines.append("  ... and {} more.".format(len(rows) - 10))
+    lines.append("")
+    lines.append(
+        "Worst is hour {}: {} left {:,.2f} MWh unused.".format(
+            worst["hour"], worst["plant"], worst["headroom"]))
+
+    raise ValueError("\n".join(lines))
+
+
+def describe_price_setter(par, price):
+    """Name whatever is generating at `price`, for a diagnostic message."""
+    if abs(price - VOLL) < TOL:
+        return "unserved energy (VoLL)"
+    for p in par["PLANTS"]:
+        if abs(par["marginal_cost"][p] - price) < TOL:
+            return p
+    return "something at ${:,.2f}/MWh".format(price)
+
+
+# --------------------------------------------------------------------------
 # Step 9 - reporting
 # --------------------------------------------------------------------------
 
@@ -686,6 +818,16 @@ def main(argv=None):
     results.round(6).to_csv(results_path, index=False)
     summary.round(6).to_csv(summary_path, index=False)
     print("Results written:\n  {}\n  {}\n".format(results_path, summary_path))
+
+    # Check the dispatch before standing behind it. This runs after the CSVs
+    # are written so that a failed run still leaves the numbers on disk to
+    # look at, but before archiving, so a run known to be wrong never enters
+    # the archive and never gets a summary printed that implies it is fine.
+    try:
+        check_merit_order(par, results)
+    except ValueError as exc:
+        raise ValueError("{}\n\nResults were still written to {} so the "
+                         "dispatch can be inspected.".format(exc, results_path))
 
     # Archive the run so it can be compared or restored later. A failure here
     # must not lose the results, which are already safely on disk.
