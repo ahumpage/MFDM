@@ -3,6 +3,10 @@
 The vocabulary of this repository. One entry per term that means something
 specific here, or that collides with a term meaning something else elsewhere.
 
+An entry says what a term **denotes**. It does not justify why the model is built
+that way — that is `docs/model_semantics.md`. If an entry needs a worked example
+to make sense, it belongs there instead, with a pointer from here.
+
 MFDM is a least-cost economic dispatch model built with PuLP, written as
 onboarding training. Readability beats cleverness throughout.
 
@@ -28,7 +32,7 @@ more MWh from a plant costs when it is already running steadily.
 
 **Merit order** — plants sorted by marginal cost. The cheapest way to serve a load
 in a single isolated hour. Ramping means the dispatch no longer follows it, and
-that is not a bug; see `docs/ramping_semantics.md`.
+that is not a bug; see `docs/model_semantics.md`.
 
 **Horizon** — the hours in `inputs/demand.csv`, currently 744. It must be
 ascending, contiguous and free of gaps, and it does **not** wrap: hour 744 is not
@@ -75,6 +79,29 @@ to the people who go without.
 **Shadow price** — retired as a column name. It meant the dual, which is now
 simply the clearing price.
 
+**Market cost** — `clearing price × demand` for an hour: what the demand of that
+hour cost at the price, as opposed to what it cost to produce. Negative in a spill
+hour, because the price is. Not the objective, which minimises production cost.
+
+**Production cost** — fuel and VOM only. Deliberately excludes ramp cost, so that
+the four components of the objective stay separable and can be checked against it.
+
+**Load-weighted price** — the average price each MWh actually paid,
+`total market cost / total demand`. The default average, because it is what is
+paid.
+
+**Time-weighted price** — the plain mean of the hourly prices, each hour counting
+once regardless of how much energy flowed. Always reported beside the
+load-weighted figure and never instead of it: cheap hours are usually quiet hours,
+so it understates what demand cost.
+
+**Producer surplus** — `market cost - production cost`, across the fleet. What
+generators collectively earn above what it cost them to generate.
+
+**Inframarginal rent** — the same idea for one plant: what it earns at the
+clearing price above its own marginal cost. A plant earns rent in every hour the
+price sits above its running cost.
+
 ---
 
 ## Scarcity and surplus
@@ -108,7 +135,7 @@ scarcity hour, because the marginal unit is destroyed energy.
 **SPILL_COST** — $1,000/MWh. Deliberately *not* VOLL: setting them equal makes
 shedding load strictly cheaper than dumping surplus, so the model would black out
 demand rather than spill and the mechanism would never fire. See
-`docs/ramping_semantics.md` §4.
+[Why spill is priced at $1,000/MWh and not at VOLL](docs/model_semantics.md#why-spill-is-priced-at-1000mwh-and-not-at-voll).
 
 ---
 
@@ -157,3 +184,18 @@ git commit, input hashes and headline KPIs.
 **KPI** — a headline number stored in a run's manifest so that listing and diffing
 never has to reopen the result CSVs. Note that the `production_cost` KPI is fuel
 and VOM only and excludes ramp cost.
+
+**Attribution** — the one-line verdict on *why* two runs differ, from comparing
+their manifests: code identical and inputs changed, inputs identical and code
+changed, both, or neither — in which case any difference is solver noise. It is
+what makes a diff interpretable rather than just two columns of numbers.
+
+**Objective reconciliation** — the check, run on every solve, that the four
+reported cost components sum to what the solver actually minimised:
+
+```
+LP objective = production cost + ramp cost + unserved cost + spill cost
+```
+
+It is a test rather than a claim. If a cost is ever double counted or dropped from
+a column, this is where it surfaces.

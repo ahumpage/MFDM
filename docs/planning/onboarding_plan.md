@@ -20,7 +20,9 @@ its edge.
   sounds domain-specific; several are deliberate collision-resolutions (spill vs
   curtailment, clearing price vs highest running cost).
 - **The model as it stands**: `README.md` (the maths), `docs/ramping_semantics.md` (the
-  reasoning). Both are current and accurate — see *Settled while charting*.
+  reasoning). Both are current and accurate — see *Settled while charting*. Note the
+  latter is to be renamed `docs/model_semantics.md` and reordered, per
+  [Which document owns which fact?](onboarding_plan/01-doc-set-ownership.md).
 - **Tracker**: local markdown, `docs/agents/issue-tracker.md`. No `gh`, no labels.
 - **Platform**: Windows, PowerShell. Commands in tickets should be runnable there.
 - **Default skills** for a ticket that names none: `grilling` + `domain-modeling`.
@@ -84,6 +86,11 @@ ticket and the Origin disagree, the ticket is right.
   repo root; python 3.8 stated in the README Quickstart and the file; `git` declared as a
   comment; CBC deliberately undocumented; no venv recommended. See
   [What are this project's dependencies, and what declares them?](onboarding_plan/00-dependency-contract.md).
+- **The documentation set.** Four documents, no more: `README.md` owns getting started
+  and the maths, `docs/model_semantics.md` (renamed from `ramping_semantics.md`) owns
+  meaning plus the input and output CSV contract, `CONTEXT.md` owns vocabulary,
+  `AGENTS.md` owns conventions and pointers and no facts at all. See
+  [Which document owns which fact?](onboarding_plan/01-doc-set-ownership.md).
 
 ## Not yet specified
 
@@ -111,8 +118,7 @@ In scope, but not yet sharp enough to ticket. Graduates as the frontier advances
   What the code *should* do when `git` is missing — warn, fail, or archive without a
   commit hash — is still open.
 - **CI.** Nothing exists. Whether a test command is worth automating depends on what
-  [Which cases must the test suite prove?](onboarding_plan/10-test-cases.md) produces.
-- **MCP**, carried over from `extra_plan.md`: "what is an MCP and figure it out / apply
+  [Which cases must the test suite prove?](onboarding_plan/10-test-cases.md) produces.- **MCP**, carried over from `extra_plan.md`: "what is an MCP and figure it out / apply
   it". Too loose to ticket, and possibly out of scope once the destination is applied.
 
 ## Out of scope

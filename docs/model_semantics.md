@@ -1,12 +1,29 @@
-# Ramping semantics in MFDM
+# Model semantics in MFDM
 
-What ramping *means* in this model: how a plant's movement between hours becomes
-a cost, what limits that movement, what happens when a plant cannot slow down
-fast enough, what the reported prices represent once cost is intertemporal, and
-which output columns exist.
+What this model *means*, as opposed to what it computes. The maths itself — sets,
+parameters, objective, constraints — is in [README.md](../README.md), and so is
+everything about running it. This document owns the reasoning underneath.
 
-Charted in [docs/planning/ramping_plan.md](planning/ramping_plan.md). Implemented
-in `model/MFDM.py`.
+Most of it is downstream of one change: **ramping couples the hours**. That is why
+the price is a dual, why the merit-order check lost its authority, and why spill
+exists at all, so ramping is introduced first and the general consequences follow.
+
+| Section | What it owns |
+|---|---|
+| [1. The problem ramping introduces](#1-the-problem-ramping-introduces) | Why hours stopped being independent |
+| [2. Ramp rate](#2-ramp-rate-what-limits-movement) | What limits movement |
+| [3. Ramp cost](#3-ramp-cost-how-movement-becomes-money) | How movement becomes money |
+| [4. Spill](#4-spill-when-a-plant-cannot-slow-down) | Spill vs curtailment, and why `SPILL_COST` is what it is |
+| [5. What the reported price means](#5-what-the-reported-price-means) | **The clearing price.** Applies model-wide |
+| [6. The merit-order check](#6-the-merit-order-check-gives-up-its-authority) | Its status. Applies model-wide |
+| [7. The CSV contract](#7-the-csv-contract) | **Every input and output column.** Applies model-wide |
+| [8. Worked example](#8-worked-example) | Two runnable three-hour fixtures |
+| [9. What changed in the full run](#9-what-changed-in-the-full-run) | Before and after, over 744 hours |
+| [10. Known gaps](#10-known-gaps) | Not decisions |
+
+Charted in [docs/planning/ramping_plan.md](planning/ramping_plan.md) and
+[docs/planning/onboarding_plan.md](planning/onboarding_plan.md). Implemented in
+`model/MFDM.py`.
 
 ---
 
@@ -334,11 +351,76 @@ rather than a bill, because some of that headroom is legitimately forgone.
 
 ---
 
-## 7. Output schema
+## 7. The CSV contract
 
-A column is a claim about meaning, so each one is listed with what it claims.
+Every file the model reads and every file it writes. A column is a claim about
+meaning, so each one is listed with what it claims.
 
-### `results/dispatch_results.csv`
+### Inputs
+
+All four live in `inputs/` by default, or in the folder given to `--inputs`. All
+four must be present; a missing one is a `FileNotFoundError` naming the path.
+
+#### `inputs/plants.csv` — one row per plant
+
+| Column | Meaning |
+|---|---|
+| `Plant` | The plant's name, and its identity throughout the outputs. Must be unique. |
+| `Technology` | `Coal`, `Gas`, `Wind` or `Solar`. Decides whether the plant is profiled. |
+| `Fuel` | Looked up in `fuel.csv`. Wind and solar carry the literal string `None`, which is read as text and not as a missing value. |
+| `Capacity (MW)` | Nameplate. The plant's ceiling in any hour, before profiles and ramping. |
+| `Efficiency (MWh/MWhTh)` | Steady-state efficiency. Electrical MWh out per thermal MWh in. |
+| `VOM ($/MWh)` | Variable operating and maintenance cost, charged on every MWh whether the plant is moving or not. |
+| `Ramp_rate (MW/hr)` | The most the plant may move between adjacent hours, in either direction. |
+| `Ramp_efficiency(MWh/MWhTh)` | Efficiency while moving. Validated never to exceed `Efficiency`; see [§3](#ramping-is-never-cheaper-than-steady-running). Located by column-name prefix, so the exact spacing does not matter. |
+
+#### `inputs/fuel.csv` — one row per fuel
+
+| Column | Meaning |
+|---|---|
+| `Technology` | Misleadingly named: it holds **fuel** names, matched against `plants.csv`'s `Fuel` column. |
+| `Fuel Price ($/MWhTh)` | Price per **thermal** MWh. Divided by efficiency to reach an electrical cost. |
+
+#### `inputs/demand.csv` — one row per hour
+
+| Column | Meaning |
+|---|---|
+| `Hour` | The hour number. Must be ascending, contiguous and free of duplicates — `check_hours` enforces this, because the ramp constraints link each row to the one above it. |
+| `Demand in region 1 (MWh)` | Demand to be served in that hour. |
+
+The horizon is however many rows this file has, currently 744. It does not wrap:
+the last hour is not followed by the first.
+
+#### `inputs/profiles.csv` — hourly availability factors
+
+This is the one input whose shape cannot be guessed, because it has **two header
+rows**:
+
+```
+,FRA,FRA
+hours,Wind,Solar
+1,0.6,0
+2,0.5,0
+```
+
+Row 1 is a region, row 2 is the series. `load_data` reads both with
+`header=[0, 1]` and flattens them into names of the form `FRA Wind`. Column
+matching then looks for the technology token (`wind`, `solar`) anywhere in the
+flattened name, so the region does not affect which column a plant is matched to.
+
+Values are **availability factors**: a share of nameplate between 0 and 1, one per
+profiled technology per hour. A technology with no matching column is not
+profiled, and the model prints a note rather than failing. The file must cover
+every hour in `demand.csv`.
+
+> The region row is a hook for multi-region support that never arrived, and
+> nothing consumes it. Whether it is removed is
+> [an open question](planning/onboarding_plan/11-profiles-region-header.md);
+> until it is settled, the two-row header above is what the parser requires.
+
+### Outputs
+
+#### `results/dispatch_results.csv`
 
 | Column | Claim |
 |---|---|
@@ -357,7 +439,7 @@ Ramp quantities are **system totals, one pair of columns**, not per plant. The
 file already carries two columns per plant; adding two more each would make it
 unreadable. Per-plant ramp lives in the summary.
 
-### `results/plant_summary.csv`
+#### `results/plant_summary.csv`
 
 New columns: `Ramp Rate (MW/hr)`, `Ramping Efficiency (MWh/MWhTh)`,
 `Ramp Premium ($/MWh)`, `Total Ramp Up (MWh)`, `Total Ramp Down (MWh)`,
@@ -372,7 +454,7 @@ cost equals the clearing price, so the old column would have read zero for every
 plant in almost every hour. Counting who was last in the merit order is still
 useful; it is simply not the same thing as setting the price.
 
-### Ramp quantities come from the dispatch, not from the LP variables
+#### Ramp quantities come from the dispatch, not from the LP variables
 
 `ramp_up` and `ramp_down` are defined by *inequalities*
 (`gen[t] - gen[t-1] <= ramp_up[t]`), so the objective only pushes them down to the
@@ -384,7 +466,7 @@ Every reported ramp quantity is therefore **recomputed from the generation profi
 after solving**, never read from the variables. The variables exist only to carry
 cost into the objective.
 
-### The objective reconciliation
+#### The objective reconciliation
 
 `report()` prints all four components and their sum:
 

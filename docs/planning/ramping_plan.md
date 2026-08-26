@@ -3,9 +3,15 @@
 `wayfinder:map` — the map for this effort. Tickets are the files in `ramping_plan/`.
 
 **Status: closed.** Every ticket is resolved. The spec is
-[docs/ramping_semantics.md](../ramping_semantics.md), and — unlike the plan below
+[docs/model_semantics.md](../model_semantics.md), and — unlike the plan below
 anticipated — the implementation landed in the same effort. See
 [What actually happened](#what-actually-happened).
+
+> Renamed since. This map was written when the spec was called
+> `docs/ramping_semantics.md`; references to that filename below are historical.
+> It became `docs/model_semantics.md` because roughly 70% of it was always
+> model-wide rather than ramping-specific — see
+> [Which document owns which fact?](onboarding_plan/01-doc-set-ownership.md).
 
 ## Destination
 

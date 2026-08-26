@@ -4,31 +4,34 @@ complications and adjusting, as part of onboarding training.
 The model should be built using PuLP.
 The code should be readable and easy to follow, so that it can be used as a learning tool.
 
-Layout and run order
-    requirements.txt        pinned dependencies, python 3.8; pip install -r requirements.txt
-    inputs/                 plants.csv, fuel.csv, demand.csv, profiles.csv
-    model/MFDM.py           the dispatch model, reads inputs/ and writes results/
-    results/                dispatch_results.csv, plant_summary.csv
-    dashboard/dashboard.py  Dash app for presenting and QA-ing results
+Read CONTEXT.md before using a term that sounds domain-specific. Several are deliberate
+collision-resolutions and the everyday meaning is the wrong one: spill is not
+curtailment, and the clearing price is not the highest running cost.
 
-Run model/MFDM.py first, then dashboard/dashboard.py, which reads the CSVs in results/.
+Layout, run order, install and command-line options are in README.md. This file holds no
+facts about the repo, only pointers and conventions; if you need to state a fact, put it
+in the document that owns it.
 
-Runs that are not the most up to date are archived by run_archive/runstore.py into a
-timestamped folder under run_archive/, each with a manifest.json recording the git commit
-and input hashes. The archive is kept in the repo so past runs stay usable on this machine.
+## Which document owns which fact
 
-## Key documents
+Before writing a fact into a document, check here that it belongs there. Reasoning behind
+this table is in docs/planning/onboarding_plan/01-doc-set-ownership.md.
 
-    CONTEXT.md                  the vocabulary. Read this before using a term that
-                                sounds domain-specific; several are collisions
-                                (spill vs curtailment, price vs highest running cost)
-    README.md                   the model stated as maths: sets, parameters,
-                                objective, constraints
-    docs/ramping_semantics.md   what ramping means, why the clearing price is now
-                                the energy-balance dual, and two worked 3-hour
-                                examples that can be run
-    docs/examples/ramping/      input folders for those worked examples. Run with
-                                model/MFDM.py --inputs <folder> --results <folder>
+    README.md               getting started, and the model as maths: sets, parameters,
+                            objective, constraints. Also the directory map, the
+                            command-line options, the LoL and SPILL_COST values, and
+                            troubleshooting. Not: why the model is built this way.
+    docs/model_semantics.md what the model means. Prices, the merit-order check's
+                            status, spill vs curtailment, ramping, the CSV contract
+                            for inputs and outputs, worked examples, known gaps.
+                            Not: the maths, and not how to run it.
+    CONTEXT.md              vocabulary, one entry per term, what a term denotes.
+                            Not: justification. If an entry needs a worked example it
+                            belongs in docs/model_semantics.md with a pointer.
+    AGENTS.md               this file. Conventions and pointers, and no facts at all.
+
+    docs/examples/ramping/  input folders for the worked examples. Run with
+                            model/MFDM.py --inputs <folder> --results <folder>
 
 ## Agent skills
 
