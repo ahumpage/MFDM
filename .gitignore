@@ -3,9 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# Run archive: run_archive/ is committed on purpose, so past runs stay usable
-# on this machine. Each manifest records the git commit and input hashes it was
-# produced from, which is what makes an old run interpretable later.
+
+#personal runs shouldn't be in repo, but some example ones should 
+run_archive/
 
 # Word lock files
 ~$*

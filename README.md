@@ -2,10 +2,19 @@
 
 This repo provides the power market model and dashboard for the my first dispatch model onboarding.
 Its purpose is to create a python PuLP linear optimisation model which determines the cheapest way to dispatch a set of power plants to meet electricity demand over a set of time periods.
+It currently takes into account renewable intermittency and plant ramping constraints. 
+
+## Quickstart: 
+
+Required packages: 
+numpy, pandas, pulp, dash, plotly
 
 Run `model/MFDM.py` first, then `dashboard/dashboard.py`, which reads the CSVs in
-`results/`.
+`results/`. Then ctrl click the http://127.0.0.1:8050 link which is returned. To rerun, first close dashboard with ctrl c.
 
+## Additional info
+
+- Uses python 3.8
 - Vocabulary: [CONTEXT.md](CONTEXT.md)
 - What ramping means and why the prices changed: [docs/ramping_semantics.md](docs/ramping_semantics.md)
 
@@ -40,7 +49,7 @@ $$K(p) = \frac{\text{fuel price}(p)}{\eta_r(p)} - \frac{\text{fuel price}(p)}{\e
 ## Objective function
 Minimise the total cost of serving demand — production, ramping, lost load and spill.
 
-$$\min \sum_{p,t} C(p)\, g(p,t) \;+\; \sum_{t} \text{VOLL}\, u(t) \;+\; \sum_{t} \text{SPILL}\, s(t) \;+\; \sum_{p,t} K(p) \left( V_{up}(p,t) + V_{dwn}(p,t) \right)$$
+$$\min \sum_{p,t} C(p)\, g(p,t) \;+\; \sum_{t} \text{LOL}\, u(t) \;+\; \sum_{t} \text{SPILL}\, s(t) \;+\; \sum_{p,t} K(p) \left( V_{up}(p,t) + V_{dwn}(p,t) \right)$$
 
 Note this minimises **production cost**, not market cost. Minimising the clearing
 price times demand would be a different problem, and a wrong one: it would ignore

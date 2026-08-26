@@ -28,7 +28,7 @@ Decision variables
 
 Objective
     minimise sum over p, t of marginal_cost[p] * gen[p][t]
-           + sum over t of VOLL * unserved[t]
+           + sum over t of LoL * unserved[t]
            + sum over t of SPILL_COST * spill[t]
            + sum over p, t of ramp_cost[p] * (ramp_up[p][t] + ramp_down[p][t])
 
@@ -41,7 +41,7 @@ Constraints
 
 Scarcity
     Demand that no plant can cover is not an error, it is expensive. The
-    `unserved` variable lets the balance always be met, priced at VOLL (the
+    `unserved` variable lets the balance always be met, priced at LoL (the
     value of lost load), which sits far above every plant's marginal cost so
     the solver only reaches for it once all real capacity is exhausted. The
     consequence is that the energy balance can no longer be infeasible, so a
@@ -77,7 +77,7 @@ Spill
     `spill[t]` is that way: energy that was generated and had to be thrown
     away.
 
-    Spill is priced at SPILL_COST, deliberately *not* at VOLL. See the comment
+    Spill is priced at SPILL_COST, deliberately *not* at LoL. See the comment
     on the constant for why the two must differ.
 
     Spill is the mirror of unserved energy and should not be confused with
@@ -160,14 +160,14 @@ TOL = 1e-6
 # Commission JRC estimate for Greece; see docs/research/scarcity_pricing.md.
 # It must stay well above the most expensive plant's marginal cost, otherwise
 # the solver would rather shed load than run that plant.
-VOLL = 8300.0
+LoL = 8300.0
 
 # What a MWh of spilled energy costs: energy that was generated because a
 # plant could not ramp down fast enough, and then had to be thrown away.
 #
-# This must NOT be set to VOLL, even though spill is the mirror of unserved
+# This must NOT be set to LoL, even though spill is the mirror of unserved
 # energy, because the two are not symmetric in cost. Shedding a MWh *removes*
-# a MWh of generation, so it saves VOLL minus the plant's marginal cost.
+# a MWh of generation, so it saves LoL minus the plant's marginal cost.
 # Dumping a MWh *requires* a MWh of extra generation, so it costs SPILL_COST
 # plus that marginal cost. Set the two constants equal and shedding always
 # comes out cheaper by twice the marginal cost, so the solver blacks out real
@@ -175,7 +175,7 @@ VOLL = 8300.0
 #
 # 1000 $/MWh sits far above the most expensive plant's marginal cost, so spill
 # stays firmly last in the stack and is never used as a cheap way to dodge
-# generating, while staying far enough below VOLL that dumping surplus is
+# generating, while staying far enough below LoL that dumping surplus is
 # always preferred to shedding load. It is a modelling constant chosen for
 # those two properties, not a physical quantity, and is worth revisiting.
 SPILL_COST = 1000.0
@@ -263,11 +263,7 @@ def build_parameters(plants, fuel, demand, profile):
     ramp_rate = {}
     ramp_efficiency = {}
     ramp_cost = {}
-
-    # Located by prefix rather than by exact header, because the ramping
-    # efficiency column is currently mislabelled "Ramp_efficiency($/hr)" while
-    # holding efficiencies in MWh/MWhTh. Matching on the prefix means renaming
-    # it to "Ramp_efficiency (MWh/MWhTh)" does not break the model.
+    
     rate_col = find_column(plants, "Ramp_rate", "plants.csv")
     ramp_eff_col = find_column(plants, "Ramp_efficiency", "plants.csv")
 
@@ -346,7 +342,7 @@ def build_parameters(plants, fuel, demand, profile):
     #
     # This is not infeasibility. The all-zeros dispatch always satisfies every
     # ramp constraint, so the LP can always retreat to it and price the demand
-    # at VOLL. That is exactly the problem: the failure is silent and shows up
+    # at LoL. That is exactly the problem: the failure is silent and shows up
     # as an absurdly expensive answer rather than an error. Measured on a
     # fixture with a 500 MW solar farm limited to 10 MW/hr and a resource that
     # falls to zero after one hour, removing this allowance takes the
@@ -522,8 +518,8 @@ def check_capacity_adequacy(par):
               .format(t, d, a))
         print("           Worst is hour {}, short by {:,.2f} MW."
               .format(worst[0], worst[1] - worst[2]))
-        print("           The shortfall will be priced at ${:,.2f}/MWh (VoLL). "
-              "Check plants.csv and demand.csv.\n".format(VOLL))
+        print("           The shortfall will be priced at ${:,.2f}/MWh (LoL). "
+              "Check plants.csv and demand.csv.\n".format(LoL))
 
 # --------------------------------------------------------------------------
 # Steps 4 to 7 - build and solve the LP
@@ -570,7 +566,7 @@ def build_and_solve(par):
     # demand left unserved, any energy thrown away, and any movement ---
     prob += (
         pulp.lpSum(par["marginal_cost"][p] * gen[p][t] for p in PLANTS for t in HOURS)
-        + pulp.lpSum(VOLL * unserved[t] for t in HOURS)
+        + pulp.lpSum(LoL * unserved[t] for t in HOURS)
         + pulp.lpSum(SPILL_COST * spill[t] for t in HOURS)
         + pulp.lpSum(par["ramp_cost"][p] * (ramp_up[p][t] + ramp_down[p][t])
                      for p in PLANTS for t in RAMP_HOURS),
@@ -626,7 +622,7 @@ def build_and_solve(par):
         raise RuntimeError(
             "Solver did not reach an optimal solution (status: {}). "
             "The all-zeros dispatch always satisfies every constraint in this "
-            "model - unserved demand is priced at VoLL rather than forbidden, "
+            "model - unserved demand is priced at LoL rather than forbidden, "
             "surplus can be spilled, and no plant has a lower bound above zero "
             "- so a feasible point always exists and this is a bug in how the "
             "LP is built rather than a problem with the input data."
@@ -720,7 +716,7 @@ def build_results(par, prob, gen, unserved, spill):
     columns["Ramp Cost ($)"] = ramp_cost_hourly
     columns["Market Cost ($)"] = price * demand_vec
     columns["Unserved Energy (MWh)"] = unserved_vec
-    columns["Unserved Cost ($)"] = VOLL * unserved_vec
+    columns["Unserved Cost ($)"] = LoL * unserved_vec
     columns["Spill (MWh)"] = spill_vec
     columns["Spill Cost ($)"] = SPILL_COST * spill_vec
     columns["Curtailment (MWh)"] = curtailed
@@ -899,7 +895,7 @@ def check_merit_order(par, results):
     running = output > TOL
     masked_mc = np.where(running, mc_vec[:, None], -np.inf)
     most_expensive = np.where(running.any(axis=0), masked_mc.max(axis=0), -np.inf)
-    comparator = np.where(unserved_vec > TOL, VOLL, most_expensive)
+    comparator = np.where(unserved_vec > TOL, LoL, most_expensive)
 
     undercut = mc_vec[:, None] < comparator - TOL     # something dearer is on
     underused = output < ceiling - TOL                # and this plant has room
@@ -955,8 +951,8 @@ def check_merit_order(par, results):
 
 def describe_price_setter(par, price):
     """Name whatever is generating at `price`, for a diagnostic message."""
-    if abs(price - VOLL) < TOL:
-        return "unserved energy (VoLL)"
+    if abs(price - LoL) < TOL:
+        return "unserved energy (LoL)"
     if abs(price + SPILL_COST) < TOL:
         return "spilled energy"
     for p in par["PLANTS"]:
@@ -1043,7 +1039,7 @@ def report(par, results, summary, objective_value=None):
     print("  Production cost            {:>16,.2f} $      (fuel and VOM)".format(prod_cost))
     print("  Ramp cost                  {:>16,.2f} $      (premium on energy moved)"
           .format(ramp_cost))
-    print("  Cost of unserved energy    {:>16,.2f} $      (VoLL x unserved)"
+    print("  Cost of unserved energy    {:>16,.2f} $      (LoL x unserved)"
           .format(unserved_cost))
     print("  Cost of spilled energy     {:>16,.2f} $      (spill price x spilled)"
           .format(spill_cost))
@@ -1098,7 +1094,7 @@ def report(par, results, summary, objective_value=None):
         short = results[results["Unserved Energy (MWh)"] > TOL]
         print("\n" + "-" * 68)
         print("SCARCITY  ({} hour(s) with unserved energy, priced at ${:,.2f}/MWh)"
-              .format(len(short), VOLL))
+              .format(len(short), LoL))
         print("-" * 68)
         for _, r in short.head(10).iterrows():
             unmet = r["Unserved Energy (MWh)"]

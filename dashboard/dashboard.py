@@ -631,7 +631,7 @@ def fig_energy_mix(run, hourly, plants):
 # still shown, as a distribution rather than a verdict.
 #
 # One thing generating in an hour is not a plant: unserved energy, priced at
-# VoLL, and spilled energy, priced negatively. Neither is in the merit order.
+# LoL, and spilled energy, priced negatively. Neither is in the merit order.
 
 QA_TOL = 1e-4          # $/MWh and MWh tolerance for declaring a violation
 MAX_VIOLATION_ROWS = 100
