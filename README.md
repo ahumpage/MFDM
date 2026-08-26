@@ -21,9 +21,9 @@ Pcost(P,T) = (fuel cost)/(efficiency) +VOM
 Which powerplants to dispatch
 
 ## Objective function
-Minimise the market cost of electricity while meeting demand
+Minimise the production cost of electricity while meeting demand
 
-$Minimise (total cost) = \sum_{t,p} MC(p) \times g(p,t) + \sum_{t} LoL_{cost} \times LoL(t) + \sum_{t} Spill_{cost} \times spill(t) + \sum_{t,p} R_{upcost} \times V_{up}(t,p) + \sum_{t,p} R_{dwncost} \times V_{dwn}(t,p)$
+$Minimise (total cost) = \sum_{p,t} MC(p) \times g(p,t) \\ + \sum_{t} LoL_{cost} \times LoL(t) \\ + \sum_{t} Spill_{cost} \times spill(t) \\ + \sum_{t,p} R_{upcost} \times V_{up}(t,p) + \sum_{t,p} R_{dwncost} \times V_{dwn}(t,p)$
 
 ## Constraints
 Demand = supply
