@@ -78,7 +78,9 @@ ticket and the Origin disagree, the ticket is right.
   `use_directories` mutates. The `check_*` functions and `report` return `None` and
   communicate solely by `print`. `MFDM.py` imports no dash and no plotly.
 - **A `VOLL` -> `LoL` rename sits uncommitted in the working tree**, touching user-facing
-  print strings, while `CONTEXT.md` defines only `VOLL`.
+  print strings, while `CONTEXT.md` defines only `VOLL`. *(Stale: the rename was in fact
+  already committed in `b42885a`. Settled by [VOLL or LoL?](onboarding_plan/02-voll-or-lol.md)
+  — `LoL` throughout, and `CONTEXT.md` now defines it.)*
 
 ## Decisions so far
 
@@ -91,6 +93,10 @@ ticket and the Origin disagree, the ticket is right.
   meaning plus the input and output CSV contract, `CONTEXT.md` owns vocabulary,
   `AGENTS.md` owns conventions and pointers and no facts at all. See
   [Which document owns which fact?](onboarding_plan/01-doc-set-ownership.md).
+- **`LoL`, not `VOLL`.** One name for the $8,300/MWh price of lost load, spelled `LoL`
+  everywhere in code and live documents; the research note keeps the source's `VoLL`, and
+  planning documents keep their historical wording. Owner's preference, taken over the
+  standard-term argument. See [VOLL or LoL?](onboarding_plan/02-voll-or-lol.md).
 
 ## Not yet specified
 

@@ -165,15 +165,15 @@ Both names are kept; see [CONTEXT.md](../CONTEXT.md).
 | Price | Free | `SPILL_COST` |
 | In the LP | Implicit — it is just `avail - gen` | An explicit decision variable |
 
-### Why spill is priced at $1,000/MWh and not at VOLL
+### Why spill is priced at $1,000/MWh and not at LoL
 
-The obvious choice is to price spill at VOLL, mirroring unserved energy exactly.
-It was the choice this effort started with, and it is wrong. **At VOLL, spill is
+The obvious choice is to price spill at LoL, mirroring unserved energy exactly.
+It was the choice this effort started with, and it is wrong. **At LoL, spill is
 strictly dominated by shedding load and never happens at all.**
 
 The two are not symmetric in cost:
 
-- Shedding a MWh **removes** a MWh of generation, so it saves `VOLL - marginal_cost`.
+- Shedding a MWh **removes** a MWh of generation, so it saves `LoL - marginal_cost`.
 - Dumping a MWh **requires** a MWh of extra generation, so it costs `SPILL_COST + marginal_cost`.
 
 Set the two constants equal and shedding is always cheaper, by twice the marginal
@@ -185,17 +185,17 @@ Measured on the Scenario 2 fixture below:
 
 | Spill price | What the model does | Objective |
 |---|---|---:|
-| VOLL ($8,300) | **Sheds 50 MWh of peak demand**, spills nothing | $418,800 |
-| VOLL, spill forced instead | Dumps 50 MWh | $420,600 |
+| LoL ($8,300) | **Sheds 50 MWh of peak demand**, spills nothing | $418,800 |
+| LoL, spill forced instead | Dumps 50 MWh | $420,600 |
 | $1,000 | Serves all demand, dumps 50 MWh | **$55,600** |
 
-The VOLL model blacks out half of peak demand rather than dump a surplus later,
+The LoL model blacks out half of peak demand rather than dump a surplus later,
 and the `spill` variable — introduced precisely to keep the model feasible under
 ramp-down floors — never leaves zero.
 
 `SPILL_COST = 1000` is chosen for two properties. It sits far above the most
 expensive plant's marginal cost ($76/MWh), so spill stays firmly last in the
-stack and is never a cheap way to avoid generating. And it sits far below VOLL,
+stack and is never a cheap way to avoid generating. And it sits far below LoL,
 so dumping surplus is always preferred to shedding real load. It is a modelling
 constant, not a physical quantity, and is worth revisiting.
 
@@ -210,7 +210,7 @@ resource in the earlier hour.
 
 **This is not infeasibility, and that is what makes it dangerous.** The
 all-zeros dispatch satisfies every ramp constraint, so the LP can always retreat
-towards it and price the demand at VOLL instead. The model does not fail; it
+towards it and price the demand at LoL instead. The model does not fail; it
 returns an absurdly expensive answer and says nothing.
 
 The model therefore allows a cost-free ramp-down beyond the rate limit, bounded by
@@ -234,7 +234,7 @@ Measured on a deliberately hostile fixture — a 500 MW solar farm limited to
 
 Without the allowance the solar farm may use 10 MWh of a 500 MWh peak, because
 anything more would strand it above its hour-2 ceiling, and 58% of demand goes
-unserved at VOLL.
+unserved at LoL.
 
 On the current inputs this never binds, because wind and solar both have a ramp
 rate equal to nameplate. It exists so that editing one number in `plants.csv`
@@ -290,7 +290,7 @@ the counter and its now-false explanation are deleted.
 ### A spill hour prices negative
 
 In a scarcity hour the marginal MWh is shed, so lost load is the marginal unit and
-the price is VOLL. In a spill hour the marginal MWh is being *destroyed*, so one
+the price is LoL. In a spill hour the marginal MWh is being *destroyed*, so one
 more MWh of demand would **save** a MWh from destruction. The price is negative.
 
 This falls out of the dual with no special case, and it is the model's first
@@ -431,7 +431,7 @@ every hour in `demand.csv`.
 | `Ramp Down (MWh)` | System total moved downward into this hour. Zero in hour 1. |
 | `Ramp Cost ($)` | **The premium alone**, not the total cost of the ramped energy. The fuel underneath a ramped MWh is already in `Production Cost`; including it here would double count. |
 | `Market Cost ($)` | `Clearing Price × Demand`. Negative in a spill hour. |
-| `Unserved Energy (MWh)` / `Unserved Cost ($)` | Demand not met, and it at VOLL. |
+| `Unserved Energy (MWh)` / `Unserved Cost ($)` | Demand not met, and it at LoL. |
 | `Spill (MWh)` / `Spill Cost ($)` | Energy generated and thrown away, and it at `SPILL_COST`. |
 | `Curtailment (MWh)` | Renewable resource available and not taken. Free and implicit. Not spill. |
 
@@ -623,7 +623,7 @@ flagged for revisiting.
 | 3 | **−$1,000.00** | The model's first negative price. An extra MWh of demand in hour 3 would absorb a MWh that is currently being destroyed, saving the full spill cost. |
 
 The hour-3 price is the mirror image of a scarcity hour. Where scarcity prices at
-VOLL because the marginal unit is shed load, spill prices at `−SPILL_COST`
+LoL because the marginal unit is shed load, spill prices at `−SPILL_COST`
 because the marginal unit is destroyed energy.
 
 `Market Cost ($)` in hour 3 is `−$1,000 × 0 = $0`, but with any non-zero demand it

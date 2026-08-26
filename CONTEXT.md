@@ -73,8 +73,9 @@ price under the name of what it actually measures. Never use it for revenue.
 Replaces the old phrase "setting the price", which is now false: under a dual, no
 plant sets the price.
 
-**VOLL** — Value of Lost Load, $8,300/MWh. What an hour of unmet demand is worth
-to the people who go without.
+**LoL** — the cost of lost load, $8,300/MWh. What an hour of unmet demand is
+worth to the people who go without, and the price unserved energy is charged at.
+A price in $/MWh, not a quantity of energy and not a probability.
 
 **Shadow price** — retired as a column name. It meant the dual, which is now
 simply the clearing price.
@@ -109,9 +110,9 @@ price sits above its running cost.
 Four distinct concepts that are easy to conflate. Two are about too little energy,
 two about too much.
 
-**Unserved energy** — demand the fleet could not meet. Priced at VOLL. Too little.
+**Unserved energy** — demand the fleet could not meet. Priced at LoL. Too little.
 
-**Scarcity hour** — an hour with unserved energy. Prices at VOLL, because the
+**Scarcity hour** — an hour with unserved energy. Prices at LoL, because the
 marginal unit is shed load.
 
 **Curtailment** — renewable resource that was *available and not taken*, because
@@ -132,10 +133,10 @@ practice thermal. Too much, and expensive.
 **Spill hour** — an hour with spill. Prices at `-SPILL_COST`, the mirror of a
 scarcity hour, because the marginal unit is destroyed energy.
 
-**SPILL_COST** — $1,000/MWh. Deliberately *not* VOLL: setting them equal makes
+**SPILL_COST** — $1,000/MWh. Deliberately *not* LoL: setting them equal makes
 shedding load strictly cheaper than dumping surplus, so the model would black out
 demand rather than spill and the mechanism would never fire. See
-[Why spill is priced at $1,000/MWh and not at VOLL](docs/model_semantics.md#why-spill-is-priced-at-1000mwh-and-not-at-voll).
+[Why spill is priced at $1,000/MWh and not at LoL](docs/model_semantics.md#why-spill-is-priced-at-1000mwh-and-not-at-lol).
 
 ---
 
@@ -171,7 +172,7 @@ limit, bounded by the collapse in the plant's own availability. Without it, a
 profiled plant whose resource falls faster than its ramp rate is trapped by its
 own good hours: it must generate far below its peak, or be stranded above its
 ceiling next hour. Note this is not an infeasibility — the model can always
-retreat to generating nothing and price the demand at VOLL, which is why the
+retreat to generating nothing and price the demand at LoL, which is why the
 failure is silent and expensive rather than loud.
 
 ---

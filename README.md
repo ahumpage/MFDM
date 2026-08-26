@@ -62,7 +62,7 @@ document are run.
 
 | Constant | Value | What it is |
 |---|---:|---|
-| `LoL` | $8,300/MWh | The cost of lost load — what unserved energy is priced at. Appears as $\text{LOL}$ in the objective below. |
+| `LoL` | $8,300/MWh | The cost of lost load — what unserved energy is priced at. Appears as $\text{LoL}$ in the objective below. |
 | `SPILL_COST` | $1,000/MWh | What energy that is generated and thrown away is charged. Appears as $\text{SPILL}$ below. |
 
 Both are set at the top of `model/MFDM.py`. Neither is a physical quantity;
@@ -115,7 +115,7 @@ $$K(p) = \frac{\text{fuel price}(p)}{\eta_r(p)} - \frac{\text{fuel price}(p)}{\e
 ### Objective function
 Minimise the total cost of serving demand — production, ramping, lost load and spill.
 
-$$\min \sum_{p,t} C(p)\, g(p,t) \;+\; \sum_{t} \text{LOL}\, u(t) \;+\; \sum_{t} \text{SPILL}\, s(t) \;+\; \sum_{p,t} K(p) \left( V_{up}(p,t) + V_{dwn}(p,t) \right)$$
+$$\min \sum_{p,t} C(p)\, g(p,t) \;+\; \sum_{t} \text{LoL}\, u(t) \;+\; \sum_{t} \text{SPILL}\, s(t) \;+\; \sum_{p,t} K(p) \left( V_{up}(p,t) + V_{dwn}(p,t) \right)$$
 
 Note this minimises **production cost**, not market cost. Minimising the clearing
 price times demand would be a different problem, and a wrong one: it would ignore
