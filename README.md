@@ -6,15 +6,18 @@ It currently takes into account renewable intermittency and plant ramping constr
 
 ## Quickstart: 
 
-Required packages: 
-numpy, pandas, pulp, dash, plotly
+Needs **python 3.8**. Install the dependencies, which are pinned in
+[requirements.txt](requirements.txt):
+
+```
+pip install -r requirements.txt
+```
 
 Run `model/MFDM.py` first, then `dashboard/dashboard.py`, which reads the CSVs in
 `results/`. Then ctrl click the http://127.0.0.1:8050 link which is returned. To rerun, first close dashboard with ctrl c.
 
 ## Additional info
 
-- Uses python 3.8
 - Vocabulary: [CONTEXT.md](CONTEXT.md)
 - What ramping means and why the prices changed: [docs/ramping_semantics.md](docs/ramping_semantics.md)
 

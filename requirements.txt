@@ -1,0 +1,16 @@
+# Python 3.8. numpy 1.24.4 and pandas 2.0.3 are the last releases that support it,
+# so these pins are ceilings set by the interpreter, not free choices.
+#
+# Install with:  pip install -r requirements.txt
+#
+# Also needed, but not installable from here: git must be on PATH, because run
+# archiving shells out to it. Without it a run still solves but prints a warning;
+# pass --no-archive to skip archiving entirely.
+
+numpy==1.24.4
+pandas==2.0.3
+pulp==3.1.1
+
+# Dashboard only. model/MFDM.py does not need these.
+plotly==6.9.0
+dash==4.3.0

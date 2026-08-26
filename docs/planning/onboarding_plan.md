@@ -64,6 +64,8 @@ ticket and the Origin disagree, the ticket is right.
 - **No dependency file of any kind exists** — not `requirements.txt`, `pyproject.toml`,
   `environment.yml`, or any lockfile. The sole declaration anywhere is one line of prose
   in `README.md`. There are no tests, no test config, no CI, and no `.ps1`/`.bat`/`Makefile`.
+  *(Dependency half addressed — `requirements.txt` now exists. Tests, config and CI still
+  do not.)*
 - **`docs/ramping_semantics.md` is already doing the job of the missing
   `docs/model_semantics.md`.** Its price definition, output-schema table and
   merit-order-check status are model-wide, not ramping-specific. Writing model semantics
@@ -78,7 +80,10 @@ ticket and the Origin disagree, the ticket is right.
 
 ## Decisions so far
 
-_None yet._
+- **The dependency contract.** A single flat, exactly pinned `requirements.txt` at the
+  repo root; python 3.8 stated in the README Quickstart and the file; `git` declared as a
+  comment; CBC deliberately undocumented; no venv recommended. See
+  [What are this project's dependencies, and what declares them?](onboarding_plan/00-dependency-contract.md).
 
 ## Not yet specified
 
@@ -98,10 +103,13 @@ In scope, but not yet sharp enough to ticket. Graduates as the frontier advances
   human interface to the archive — `list`, `show`, `diff`, `restore`, `prune` — and is
   named in neither `README.md` nor `AGENTS.md`. Likely graduates off
   [Which document owns which fact?](onboarding_plan/01-doc-set-ownership.md).
-- **`git` as an undeclared runtime dependency.** `runstore.git_state()` shells out to
-  `git` via `subprocess`, so the default archiving path fails without it. Probably folds
-  into [What are this project's dependencies, and what declares them?](onboarding_plan/00-dependency-contract.md),
-  but may want its own answer about what happens when `git` is absent.
+- **What happens when `git` is absent.** `runstore.git_state()` shells out to `git` via
+  `subprocess`, so the default archiving path degrades to a warning without it. The
+  *declaration* half is settled by
+  [What are this project's dependencies, and what declares them?](onboarding_plan/00-dependency-contract.md),
+  which records `git` as a comment in `requirements.txt` pointing at `--no-archive`.
+  What the code *should* do when `git` is missing — warn, fail, or archive without a
+  commit hash — is still open.
 - **CI.** Nothing exists. Whether a test command is worth automating depends on what
   [Which cases must the test suite prove?](onboarding_plan/10-test-cases.md) produces.
 - **MCP**, carried over from `extra_plan.md`: "what is an MCP and figure it out / apply

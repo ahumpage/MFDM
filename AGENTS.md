@@ -5,6 +5,7 @@ The model should be built using PuLP.
 The code should be readable and easy to follow, so that it can be used as a learning tool.
 
 Layout and run order
+    requirements.txt        pinned dependencies, python 3.8; pip install -r requirements.txt
     inputs/                 plants.csv, fuel.csv, demand.csv, profiles.csv
     model/MFDM.py           the dispatch model, reads inputs/ and writes results/
     results/                dispatch_results.csv, plant_summary.csv
