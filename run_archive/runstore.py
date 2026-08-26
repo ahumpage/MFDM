@@ -256,6 +256,10 @@ def archive_run(label=None, notes=None, solver_status=None, seconds=None):
             code[Path(name).name] = sha256_file(path)
 
     manifest = {
+        # A convenience copy of the folder name, so a run folder copied
+        # elsewhere still says what it is. Readers take the id from the folder
+        # (see list_runs), so renaming the folder later is safe and this value
+        # is allowed to go stale.
         "id": run_id,
         "created": created.isoformat(timespec="seconds"),
         "label": label,
@@ -279,21 +283,30 @@ def archive_run(label=None, notes=None, solver_status=None, seconds=None):
 # --------------------------------------------------------------------------
 
 def list_runs():
-    """All archived runs, newest first."""
+    """All archived runs, newest first.
+
+    The folder name is the run id. The manifest carries a copy of it, but that
+    copy is only provenance for a folder that gets copied somewhere else; on
+    read the filesystem wins. That is what makes renaming a run folder safe:
+    the id every caller receives is, by construction, one that can be found
+    again on disk.
+    """
     if not RUNS_DIR.exists():
         return []
     out = []
     for child in RUNS_DIR.iterdir():
-        if not child.is_dir() or child.name == "_store":
+        if not child.is_dir() or child.name in ("_store", "__pycache__"):
             continue
         path = child / MANIFEST_NAME
         if not path.exists():
             continue
         try:
             with open(str(path)) as fh:
-                out.append(json.load(fh))
+                manifest = json.load(fh)
         except (ValueError, OSError):
             continue
+        manifest["id"] = child.name
+        out.append(manifest)
     out.sort(key=lambda m: m.get("created", ""), reverse=True)
     return out
 
@@ -301,13 +314,21 @@ def list_runs():
 def get_manifest(run_id):
     path = RUNS_DIR / run_id / MANIFEST_NAME
     if not path.exists():
-        raise FileNotFoundError("No such run: {}".format(run_id))
+        raise FileNotFoundError(
+            "No such run folder: run_archive/{}".format(run_id))
     with open(str(path)) as fh:
-        return json.load(fh)
+        manifest = json.load(fh)
+    # Same rule as list_runs: the folder the manifest was read from is the id.
+    manifest["id"] = run_id
+    return manifest
 
 
 def resolve(run_ref):
-    """Accept a full run id, a unique prefix, a label, or 'latest'."""
+    """Accept a full run id, a unique prefix, a label, or 'latest'.
+
+    A run id is a folder name under run_archive/, so anything returned here
+    can be path-joined straight back onto RUNS_DIR.
+    """
     runs = list_runs()
     if not runs:
         raise FileNotFoundError("No runs have been archived yet.")
@@ -431,7 +452,12 @@ def prune(keep=20, unlabelled_only=True):
     doomed = candidates[keep:] if keep > 0 else candidates
     removed = []
     for m in doomed:
-        shutil.rmtree(str(RUNS_DIR / m["id"]), ignore_errors=True)
+        # Deliberately not ignore_errors: a delete that fails silently but is
+        # still reported as "Removed" is worse than a noisy failure, because
+        # the run stays on disk while you believe it is gone. Anything that
+        # goes wrong here (a locked folder, a permissions problem) should
+        # stop the prune and say so.
+        shutil.rmtree(str(RUNS_DIR / m["id"]))
         removed.append(m["id"])
 
     orphans = gc_store()

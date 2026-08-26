@@ -1,24 +1,24 @@
 {
-  "id": "standard",
-  "created": "2026-08-24T15:42:58",
+  "id": "20260826T092611",
+  "created": "2026-08-26T09:26:11",
   "label": null,
   "notes": null,
   "git": {
-    "commit": "a3364e84738602a0480233c1ee1f749a19e30d93",
-    "short": "a3364e8",
-    "branch": "main",
+    "commit": "e43e2e2e933790eb10e76c19713d03de95612bfa",
+    "short": "e43e2e2",
+    "branch": "testing",
     "dirty": true
   },
   "code": {
-    "MFDM.py": "b47739ca2d83a556",
-    "dashboard.py": "27ac24962f9d84a9",
-    "runstore.py": "d9554a96af1beb31",
+    "MFDM.py": "401a23be513ca198",
+    "dashboard.py": "07815656de3652c0",
+    "runstore.py": "7b09bba3330c0a56",
     "runs.py": "2d46934a14eae845"
   },
   "inputs": {
     "plants.csv": {
-      "hash": "0f4b256287236146",
-      "size": 244
+      "hash": "5d8bf42a1de32c20",
+      "size": 272
     },
     "fuel.csv": {
       "hash": "71fa218d97b91dbd",
@@ -34,12 +34,12 @@
     }
   },
   "outputs": {
-    "dispatch_results.csv": "e5ecb19dd332bbfe",
+    "dispatch_results.csv": "53106a855518685f",
     "plant_summary.csv": "2878638e9692dff2"
   },
   "solver": {
     "status": "Optimal",
-    "seconds": 0.171
+    "seconds": 0.182
   },
   "kpis": {
     "hours": 744,

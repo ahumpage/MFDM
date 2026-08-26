@@ -25,6 +25,7 @@ over days or weeks flattens the peaks that a duration curve exists to show.
 from pathlib import Path
 import sys
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from dash import Dash, dcc, html, Input, Output, State, callback_context, dash_table
@@ -1122,6 +1123,22 @@ app.layout = html.Div([
                                 "flexWrap": "wrap"}),
             ], style=CARD),
             html.Div([html.Div(id="compare-inputs")], style=CARD),
+            html.Div([
+                html.Label("View", style={"fontWeight": "600",
+                                          "fontSize": "13px",
+                                          "marginRight": "12px"}),
+                dcc.RadioItems(
+                    id="compare-mode",
+                    options=[{"label": " Difference (B minus A)",
+                              "value": "difference"},
+                             {"label": " Absolute (A and B)",
+                              "value": "absolute"}],
+                    value="difference",
+                    inline=True,
+                    inputStyle={"marginRight": "5px"},
+                    labelStyle={"marginRight": "18px", "fontSize": "13px"},
+                ),
+            ], style=CARD),
             html.Div([dcc.Graph(id="graph-compare-dispatch")], style=CARD),
             html.Div([dcc.Graph(id="graph-compare-price")], style=CARD),
             html.Div([html.Div(id="compare-plants")], style=CARD),
@@ -1298,18 +1315,139 @@ def compare_inputs_table(a, b):
     return html.Div(blocks)
 
 
-def fig_compare_total(a, b, lo, hi, resolution):
-    """Total generation of each run over time. Stacks cannot be overlaid
-    legibly, so the comparison shows each run's total against demand."""
+# --------------------------------------------------------------------------
+# Comparison charts
+# --------------------------------------------------------------------------
+#
+# The comparison shows the difference between two runs rather than two sets of
+# absolutes overlaid. Two stacks cannot be read against each other, and even
+# two total lines only tell you *that* something moved. A stack of per-plant
+# deltas tells you *why*: coal down, solar up.
+#
+# Sign is carried by position, above or below zero, not by colour. Plants keep
+# the colours they have everywhere else in the dashboard, which also avoids
+# inventing a red/green pair that this file deliberately does not use.
+
+DELTA_TOL = 1e-6        # below this a delta counts as no change at all
+
+
+def align_runs(agg_a, agg_b):
+    """Restrict two aggregated runs to the periods they have in common.
+
+    Returns (aligned_a, aligned_b, dropped) with matching row order, so the
+    two can be subtracted safely.
+
+    Worth doing properly rather than comparing lengths. `aggregate` buckets on
+    the absolute hour, so equal-length frames are *usually* aligned, but two
+    runs whose hours have gaps can be the same length and still describe
+    different periods. Joining on x says so explicitly instead of relying on
+    that coincidence, and reports how much of each run had no counterpart.
+    """
+    common = pd.Index(sorted(set(agg_a["x"]) & set(agg_b["x"])), name="x")
+    dropped = (len(agg_a) - len(common)) + (len(agg_b) - len(common))
+    aligned_a = agg_a.set_index("x").reindex(common).reset_index()
+    aligned_b = agg_b.set_index("x").reindex(common).reset_index()
+    return aligned_a, aligned_b, dropped
+
+
+def dropped_note(dropped):
+    if not dropped:
+        return ""
+    return "  -  {} period(s) outside the overlap not shown".format(dropped)
+
+
+def plant_delta(a, b, agg_a, agg_b, plant):
+    """B minus A for one plant, treating a fleet it is absent from as zero."""
+    def series(run, agg):
+        if plant not in run.meta:
+            return pd.Series(0.0, index=agg.index)
+        col = run.meta[plant]["column"]
+        if col not in agg.columns:
+            return pd.Series(0.0, index=agg.index)
+        return agg[col].fillna(0.0)
+    return series(b, agg_b).values - series(a, agg_a).values
+
+
+def annotate_no_change(fig, message):
+    """Make 'nothing moved' look deliberate rather than broken.
+
+    A delta chart of two similar runs is a flat line on zero, which reads as a
+    failure to draw anything. Saying so, and holding the axis open around
+    zero, is the difference between an empty chart and an answer.
+    """
+    fig.add_annotation(text=message, showarrow=False, xref="paper", yref="paper",
+                       x=0.5, y=0.5, font=dict(size=13, color="#666666"))
+    fig.update_yaxes(range=[-1, 1])
+    return fig
+
+
+def fig_compare_generation(a, b, lo, hi, resolution, plants, mode):
+    """Generation compared: per-plant differences, or the two absolutes."""
     agg_a = aggregate(a, slice_hours(a, lo, hi), resolution)
     agg_b = aggregate(b, slice_hours(b, lo, hi), resolution)
     if agg_a.empty or agg_b.empty:
         return empty_figure("No overlapping hours to compare")
 
+    if mode == "absolute":
+        return _fig_generation_absolute(a, b, agg_a, agg_b, resolution, plants)
+
+    agg_a, agg_b, dropped = align_runs(agg_a, agg_b)
+    if agg_a.empty:
+        return empty_figure("The two runs share no periods in this window")
+
+    # The union of both fleets, in merit order, filtered to what is visible.
+    order = list(a.plant_order) + [p for p in b.plant_order
+                                   if p not in a.meta]
+    shown = [p for p in order if p in plants]
+    if not shown:
+        return empty_figure("No plants selected")
+
+    deltas = {p: plant_delta(a, b, agg_a, agg_b, p) for p in shown}
+    net = np.sum(list(deltas.values()), axis=0)
+    biggest = max((np.abs(v).max() for v in deltas.values()), default=0.0)
+
+    # Bars are the point of this chart, but hundreds of them stack into mush.
+    # Above the threshold fall back to the net line alone and say so in the
+    # title, the same "never switch silently" rule the dispatch chart follows.
+    use_bars = len(agg_a) <= BAR_THRESHOLD
+
+    fig = go.Figure()
+    if use_bars:
+        for p in shown:
+            meta = a.meta.get(p) or b.meta[p]
+            fig.add_trace(go.Bar(x=agg_a["x"], y=deltas[p], name=p,
+                                 marker_color=meta["colour"]))
+        fig.update_layout(barmode="relative", bargap=0.05)
+
+    net_name = "Net change" if len(shown) == len(order) else "Net change (shown plants)"
+    fig.add_trace(go.Scatter(
+        x=agg_a["x"], y=net, name=net_name, mode="lines",
+        line=dict(color=C_NEUTRAL, width=1.8,
+                  shape="hvh" if resolution == "hourly" else "linear")))
+
+    fig.add_hline(y=0, line=dict(color="#333333", width=1))
+
+    if use_bars:
+        detail = "per plant"
+    else:
+        detail = "net only above {} periods, choose daily or weekly for the " \
+                 "per-plant breakdown".format(BAR_THRESHOLD)
+    title = "Change in generation, B minus A ({}){}".format(
+        detail, dropped_note(dropped))
+    fig = base_layout(fig, title, axis_label(resolution),
+                      "Change in {}".format(energy_label(resolution).lower()))
+
+    if biggest < DELTA_TOL and np.abs(net).max() < DELTA_TOL:
+        annotate_no_change(fig, "No change: both runs generate identically here")
+    return fig
+
+
+def _fig_generation_absolute(a, b, agg_a, agg_b, resolution, plants):
+    """The old view: each run's total against demand. Kept for the toggle."""
     def total(run, agg):
         cols = [run.meta[p]["column"] for p in run.plant_order
-                if run.meta[p]["column"] in agg.columns]
-        return agg[cols].sum(axis=1)
+                if p in plants and run.meta[p]["column"] in agg.columns]
+        return agg[cols].sum(axis=1) if cols else pd.Series(0.0, index=agg.index)
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=agg_a["x"], y=total(a, agg_a), name="A generation",
@@ -1324,7 +1462,8 @@ def fig_compare_total(a, b, lo, hi, resolution):
                        axis_label(resolution), energy_label(resolution))
 
 
-def fig_compare_price(a, b, lo, hi, resolution):
+def fig_compare_price(a, b, lo, hi, resolution, mode):
+    """Clearing price compared: the difference, or the two absolutes."""
     agg_a = aggregate(a, slice_hours(a, lo, hi), resolution)
     agg_b = aggregate(b, slice_hours(b, lo, hi), resolution)
     if agg_a.empty or agg_b.empty:
@@ -1333,34 +1472,59 @@ def fig_compare_price(a, b, lo, hi, resolution):
     # "hvh" to match the step convention used elsewhere: each flat run is
     # centred on its hour.
     shape = "hvh" if resolution == "hourly" else "linear"
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=agg_a["x"], y=agg_a[PRICE_COL], name="A price",
-                             mode="lines",
-                             line=dict(color=C_RUN_A, width=1.8, shape=shape)))
-    fig.add_trace(go.Scatter(x=agg_b["x"], y=agg_b[PRICE_COL], name="B price",
-                             mode="lines",
-                             line=dict(color=C_RUN_B, width=1.8, shape=shape,
-                                       dash="dash")))
 
-    # Difference only makes sense where the two share an x axis.
-    if len(agg_a) == len(agg_b):
-        fig.add_trace(go.Scatter(
-            x=agg_a["x"], y=(agg_b[PRICE_COL].values - agg_a[PRICE_COL].values),
-            name="B minus A", mode="lines", yaxis="y2",
-            line=dict(color=C_NEUTRAL, width=1.1)))
+    if mode == "absolute":
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=agg_a["x"], y=agg_a[PRICE_COL], name="A price",
+                                 mode="lines",
+                                 line=dict(color=C_RUN_A, width=1.8, shape=shape)))
+        fig.add_trace(go.Scatter(x=agg_b["x"], y=agg_b[PRICE_COL], name="B price",
+                                 mode="lines",
+                                 line=dict(color=C_RUN_B, width=1.8, shape=shape,
+                                           dash="dash")))
         return base_layout(fig, "Clearing price: A vs B",
-                           axis_label(resolution), "Price ($/MWh)",
-                           y2label="Difference ($/MWh)")
-    return base_layout(fig, "Clearing price: A vs B",
-                       axis_label(resolution), "Price ($/MWh)")
+                           axis_label(resolution), "Price ($/MWh)")
+
+    agg_a, agg_b, dropped = align_runs(agg_a, agg_b)
+    if agg_a.empty:
+        return empty_figure("The two runs share no periods in this window")
+
+    diff = agg_b[PRICE_COL].values - agg_a[PRICE_COL].values
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=agg_a["x"], y=diff, name="B minus A", mode="lines",
+        fill="tozeroy", fillcolor="rgba(102, 102, 102, 0.18)",
+        line=dict(color=C_NEUTRAL, width=1.6, shape=shape)))
+    fig.add_hline(y=0, line=dict(color="#333333", width=1))
+
+    fig = base_layout(fig, "Change in clearing price, B minus A{}".format(
+                          dropped_note(dropped)),
+                      axis_label(resolution), "Change in price ($/MWh)")
+
+    # Centred on zero rather than anchored to it, so a rise and a fall of the
+    # same size look the same size.
+    reach = float(np.abs(diff).max()) if len(diff) else 0.0
+    if reach < DELTA_TOL:
+        annotate_no_change(fig, "No change: the two runs price identically here")
+    else:
+        fig.update_yaxes(range=[-reach * 1.15, reach * 1.15])
+    return fig
 
 
-def compare_plants_table(a, b, lo, hi):
+def compare_plants_table(a, b, lo, hi, plants):
     """Per-plant generation in each run over the visible window, including
     plants that exist in only one of the two fleets."""
     ha, hb = slice_hours(a, lo, hi), slice_hours(b, lo, hi)
+
+    # Merit order, cheapest first, matching every other listing in the app.
+    # A's fleet sets the order; plants only in B are appended by their own
+    # marginal cost.
+    order = list(a.plant_order) + [p for p in b.plant_order if p not in a.meta]
     rows = []
-    for p in sorted(set(a.plant_order) | set(b.plant_order)):
+    for p in order:
+        if p not in plants:
+            continue
         in_a, in_b = p in a.meta, p in b.meta
         gen_a = float(ha[a.meta[p]["column"]].sum()) if in_a and not ha.empty else None
         gen_b = float(hb[b.meta[p]["column"]].sum()) if in_b and not hb.empty else None
@@ -1375,6 +1539,11 @@ def compare_plants_table(a, b, lo, hi):
             "Generation B": "{:,.0f}".format(gen_b) if gen_b is not None else "-",
             "Change": "{:+,.0f}".format(delta) if delta is not None else
                       ("only in B" if not in_a else "only in A"),
+            # Hidden, and only for colouring the Change cell. A formatted
+            # string cannot be compared numerically.
+            "_direction": ("up" if delta is not None and delta > DELTA_TOL else
+                           "down" if delta is not None and delta < -DELTA_TOL else
+                           "flat"),
         })
 
     cols = ["Plant", "Technology", "Capacity A", "Capacity B",
@@ -1389,11 +1558,21 @@ def compare_plants_table(a, b, lo, hi):
             style_cell={"fontFamily": "Segoe UI, Helvetica, Arial, sans-serif",
                         "fontSize": "12px", "padding": "6px", "textAlign": "left"},
             style_header={"backgroundColor": "#F4F5F7", "fontWeight": "600"},
+            # The run colours rather than a red/green pair, so "moved B's way"
+            # reads the same here as it does in the charts.
+            style_data_conditional=[
+                {"if": {"column_id": "Change",
+                        "filter_query": "{_direction} = up"},
+                 "color": C_RUN_B, "fontWeight": "600"},
+                {"if": {"column_id": "Change",
+                        "filter_query": "{_direction} = down"},
+                 "color": C_RUN_A, "fontWeight": "600"},
+            ],
         ),
     ])
 
 
-def build_comparison(a, b, lo, hi, resolution):
+def build_comparison(a, b, lo, hi, resolution, plants, mode):
     ka, kb = window_kpis(a, lo, hi), window_kpis(b, lo, hi)
 
     cards = []
@@ -1405,9 +1584,9 @@ def build_comparison(a, b, lo, hi, resolution):
     return (compare_attribution(a, b),
             cards,
             compare_inputs_table(a, b),
-            fig_compare_total(a, b, lo, hi, resolution),
-            fig_compare_price(a, b, lo, hi, resolution),
-            compare_plants_table(a, b, lo, hi))
+            fig_compare_generation(a, b, lo, hi, resolution, plants, mode),
+            fig_compare_price(a, b, lo, hi, resolution, mode),
+            compare_plants_table(a, b, lo, hi, plants))
 
 
 # --------------------------------------------------------------------------
@@ -1417,15 +1596,49 @@ def build_comparison(a, b, lo, hi, resolution):
 @app.callback(
     Output("run-select", "options"),
     Output("run-compare", "options"),
+    Output("run-compare", "value"),
     Input("run-refresh", "n_clicks"),
     Input("run-select", "value"),
+    State("run-compare", "value"),
 )
-def refresh_run_lists(_clicks, selected):
+def refresh_run_lists(_clicks, selected, current_compare):
     """Keep both dropdowns in step with what is on disk. A run archived while
     the dashboard is open shows up after a refresh."""
     options = run_options()
     compare = [o for o in options if o["value"] != selected]
-    return options, compare
+
+    # Default the comparison to the previous run, so the tab has something in
+    # it on arrival rather than an empty prompt. Only when nothing is chosen:
+    # a manual pick, and a deliberate clearing, both survive a refresh,
+    # because a default that reasserts itself is worse than a stale one.
+    value = current_compare
+    if value is None:
+        value = previous_run_id(options, selected)
+    elif value == selected:
+        # A cannot also be B. Fall back to the default rather than leaving a
+        # selection that is about to disappear from the options list.
+        value = previous_run_id(options, selected)
+    return options, compare, value
+
+
+def previous_run_id(options, selected):
+    """The archived run immediately older than the selected one.
+
+    `run_options` is the working folder first, then archived runs newest
+    first, so "the next entry along" is the previous run in both cases: the
+    newest archive when the working folder is selected, and the next one down
+    when an archived run is. The oldest run has no predecessor and gets None,
+    which leaves the comparison empty rather than wrapping around to a run
+    that is not its neighbour in any sense.
+    """
+    values = [o["value"] for o in options]
+    if selected not in values:
+        return None
+    for candidate in values[values.index(selected) + 1:]:
+        if candidate != CURRENT_ID:
+            return candidate
+    return None
+
 
 
 @app.callback(
@@ -1630,8 +1843,10 @@ def update_qa(rng):
     Output("compare-plants", "children"),
     Input("store-range", "data"),
     Input("resolution", "value"),
+    Input("plant-toggle", "value"),
+    Input("compare-mode", "value"),
 )
-def update_compare(rng, resolution):
+def update_compare(rng, resolution, plants, mode):
     run_id, compare_id = rng.get("run"), rng.get("compare")
     if not compare_id:
         msg = html.Div("Pick a run in 'Compare with' above to see a comparison.",
@@ -1641,7 +1856,9 @@ def update_compare(rng, resolution):
 
     a = get_run(run_id)
     b = get_run(compare_id)
-    return build_comparison(a, b, rng["lo"], rng["hi"], resolution)
+    return build_comparison(a, b, rng["lo"], rng["hi"], resolution,
+                            plants or [], mode or "difference")
+
 
 
 # --------------------------------------------------------------------------
