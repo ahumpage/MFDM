@@ -127,7 +127,7 @@ def cmd_show(args):
 
     print("\n  plants")
     print("    {:<10} {:<8} {:>9} {:>9} {:>14} {:>8} {:>10}".format(
-        "PLANT", "TECH", "CAP MW", "MC $/MWh", "GEN MWh", "CF %", "PRICE h"))
+        "PLANT", "TECH", "CAP MW", "MC $/MWh", "GEN MWh", "CF %", "STACK h"))
     for p in k["plants"]:
         print("    {:<10} {:<8} {:>9,.0f} {:>9,.2f} {:>14,.1f} {:>8,.1f} {:>10}".format(
             p["plant"], p["technology"], p["capacity_mw"], p["marginal_cost"],
@@ -207,7 +207,7 @@ def cmd_diff(args):
     # --- plants ---
     print("\nPLANTS")
     print("  {:<10} {:>19} {:>25} {:>19}".format(
-        "PLANT", "CAPACITY MW", "GENERATION MWh", "PRICE-SETTING h"))
+        "PLANT", "CAPACITY MW", "GENERATION MWh", "LAST IN STACK h"))
     for p in d["plant_delta"]:
         if not p["in_a"]:
             note = "  (only in B)"

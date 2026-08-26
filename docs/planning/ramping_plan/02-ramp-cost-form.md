@@ -1,8 +1,8 @@
 # How does ramping efficiency become a cost in the objective?
 
 - **Type**: `wayfinder:grilling` (HITL)
-- **Status**: open
-- **Assignee**: unclaimed
+- **Status**: resolved
+- **Assignee**: Alice (with OpenCode)
 - **Blocked by**: [Research: ramp cost and prices](00-research-ramp-cost-and-prices.md)
 - **Part of**: [Map: Ramping](../ramping_plan.md)
 
@@ -47,3 +47,43 @@ Settle:
   merit order, or *outside* it as a separate charge. This determines what the merit
   order even means and feeds
   [What the clearing price represents](04-clearing-price-meaning.md).
+
+## Decision
+
+**Formulation (a), the per-MWh-of-ramp adder.** The objective term is
+
+```
+sum over p, t of ramp_cost(p) * ( ramp_up[p][t] + ramp_down[p][t] )
+
+ramp_cost(p) = fuel_price(p)/ramp_efficiency(p) - fuel_price(p)/efficiency(p)
+```
+
+Chosen because it is the only one of the three that stays a linear program, which
+[the research ticket](00-research-ramp-cost-and-prices.md) settled as the
+requirement. (b) needs a binary indicator; (c) prices the wrong thing.
+
+**The ramped MWh is charged twice, and this is intended.** Once at the plant''s
+ordinary marginal cost through the existing `marginal_cost * gen` term, then again
+for the premium. The premium is defined as the *difference* between the two fuel
+costs, so charging it alone would under-recover; charging the full ramped heat
+rate instead of the ordinary one would require knowing which MWh were "the ramped
+ones", which is formulation (b). Stated explicitly in the spec.
+
+**VOM is excluded from the premium.** It is charged on every MWh either way,
+through the marginal cost. Only the fuel burn differs while ramping.
+
+**Renewables ramping for free is luck, not a decision.** Wind and solar get
+`ramp_cost = 0` because their fuel price is zero, and the zero is doing work
+nobody chose. Recorded as a known gap in the spec rather than fixed here: giving
+renewables a real ramp cost needs a view on what it represents, which is new work.
+
+**A guard was added.** `ramp_efficiency(p) <= efficiency(p)` is validated on load,
+mirroring the existing efficiency guard. Without it a plant more efficient while
+moving would have a negative premium and the solver would be paid to jiggle it.
+
+**The premium sits outside the merit order, not inside the offer price.** It is a
+separate charge on movement, not a modification to `marginal_cost`, because it is
+charged per MWh *moved* rather than per MWh *generated* — a plant holding steady
+at 90% output pays nothing. This is what makes the merit order stop predicting the
+dispatch, and it feeds directly into
+[04](04-clearing-price-meaning.md) and [06](06-merit-order-invariant.md).

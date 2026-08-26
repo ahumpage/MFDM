@@ -1,8 +1,8 @@
 # What does `Ramp_time (hrs)` mean?
 
 - **Type**: `wayfinder:grilling` (HITL)
-- **Status**: open
-- **Assignee**: unclaimed
+- **Status**: resolved
+- **Assignee**: Alice (with OpenCode)
 - **Blocked by**: —
 - **Part of**: [Map: Ramping](../ramping_plan.md)
 
@@ -44,3 +44,32 @@ Settle:
 - Whether the hard rate limit is worth having at all if no plausible input makes it
   bind. If the answer is that only the ramp *cost* ever shapes dispatch, the spec
   should say so plainly rather than describing a constraint that never fires.
+
+## Decision
+
+**Dissolved by the input data changing.** This ticket asked how to derive a MW/hr
+ramp rate from a `Ramp_time (hrs)` column whose only plausible readings either
+never bind or order the technologies wrongly.
+
+`inputs/plants.csv` no longer has that column. It now carries `Ramp_rate (MW/hr)`
+directly:
+
+| Plant | Technology | Capacity | Ramp rate |
+|-------|-----------|---------:|----------:|
+| Plant 1 | Solar | 500 | 500 |
+| Plant 2 | Wind | 300 | 300 |
+| Plant 3 | Coal | 100 | 50 |
+| Plant 4 | Gas | 600 | 200 |
+| Plant 5 | Gas | 1000 | 400 |
+
+There is nothing left to derive: `R(p)` is read straight from the column. The
+values order correctly by technology, with coal the slowest relative to its size,
+and they bind — coal loses 9,300 MWh of generation to the faster gas plant over
+the 744-hour run precisely because it cannot follow demand.
+
+The ticket's closing question — *"is the hard rate limit worth having at all if no
+plausible input makes it bind?"* — is answered yes, on these numbers.
+
+Wind and solar carry a ramp rate equal to their nameplate capacity, so they are
+effectively unconstrained. That is a placeholder rather than a decision, and is
+recorded as a known gap in the spec.

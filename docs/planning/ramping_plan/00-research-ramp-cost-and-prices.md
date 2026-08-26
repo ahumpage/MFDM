@@ -1,8 +1,8 @@
 # How do production models price ramping, and what does a dual mean under ramp constraints?
 
 - **Type**: `wayfinder:research` (AFK)
-- **Status**: open
-- **Assignee**: unclaimed
+- **Status**: resolved
+- **Assignee**: Alice (with OpenCode)
 - **Blocked by**: —
 - **Part of**: [Map: Ramping](../ramping_plan.md)
 
@@ -43,3 +43,21 @@ generator's offer explains.
 
 Capture to `docs/research/ramping.md`, matching the shape of the existing
 `docs/research/scarcity_pricing.md`. Link it back here when done.
+
+## Decision
+
+Captured in [docs/research/ramping.md](../../research/ramping.md). Three findings
+carried into the tickets that waited on this:
+
+1. **Use a linear penalty on the ramp delta**, to keep the problem an LP. The
+   `V_up` / `V_dwn` structure in the Origin outline is the standard linearisation.
+   Re-pricing a ramping unit's whole output at a degraded heat rate is conditional
+   on *whether* it ramped and needs a binary, so it is not available here.
+2. **Degraded efficiency while ramping is an approximation**, and the price effect
+   comes through the extra fuel burnt. It is charged as a premium per MWh moved,
+   on top of the ordinary marginal cost.
+3. **It is production cost that should be minimised**, not any one marginal cost.
+   That is what lets the objective trade ramping against lost load and spill, and
+   it is why the energy-balance dual becomes the honest price once the hours are
+   coupled: the dual absorbs ramp shadow costs from neighbouring hours and stops
+   equalling any plant's marginal cost.

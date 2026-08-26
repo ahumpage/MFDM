@@ -190,6 +190,13 @@ def compute_kpis(results, summary):
     }
 
     for _, r in summary.iterrows():
+        # "Hours Setting Price" was renamed to "Hours Last in Stack" when
+        # ramping made the clearing price the energy-balance dual, which is no
+        # longer equal to any plant's marginal cost. The KPI key is left alone
+        # so that runs archived before and after the rename still diff against
+        # each other; only the column it is read from moved.
+        last_in_stack = r["Hours Last in Stack"] if "Hours Last in Stack" in summary.columns \
+            else r["Hours Setting Price"]
         kpis["plants"].append({
             "plant": r["Plant"],
             "technology": r["Technology"],
@@ -199,7 +206,7 @@ def compute_kpis(results, summary):
             "generation_mwh": float(r["Total Generation (MWh)"]),
             "capacity_factor_pct": float(r["Capacity Factor (%)"]),
             "hours_running": int(r["Hours Running"]),
-            "hours_setting_price": int(r["Hours Setting Price"]),
+            "hours_setting_price": int(last_in_stack),
         })
     return kpis
 

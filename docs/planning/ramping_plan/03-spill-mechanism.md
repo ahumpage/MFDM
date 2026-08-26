@@ -1,8 +1,8 @@
 # Spill: system-wide or per-plant, and is it "spill" or "curtailment"?
 
 - **Type**: `wayfinder:grilling` (HITL)
-- **Status**: open
-- **Assignee**: unclaimed
+- **Status**: resolved
+- **Assignee**: Alice (with OpenCode)
 - **Blocked by**: —
 - **Part of**: [Map: Ramping](../ramping_plan.md)
 
@@ -44,3 +44,38 @@ Settle:
 - What the sign convention is in the energy balance. The map has
   `sum(gen) + unserved - spill == demand`, so spill enters negatively; confirm that
   reads more clearly than moving it to the other side.
+
+## Decision
+
+**1. Spill is system-wide: one `spill[t]` per hour, not per plant.** The
+attribution a per-plant variable would offer is arbitrary whenever more than one
+plant is pinned by its ramp-down floor, and the ticket''s own argument stands —
+reporting an arbitrary split as if it were a finding is worse than reporting no
+split at all.
+
+**2. Both terms are kept, and they mean different things.** Written into
+[CONTEXT.md](../../../CONTEXT.md), which this ticket created.
+
+| | Curtailment | Spill |
+|---|---|---|
+| What it is | Renewable resource available but not taken | Energy generated and then destroyed |
+| Which plants | Wind and solar only | Any plant, in practice thermal |
+| Price | Free | `SPILL_COST` |
+| In the LP | Implicit, just `avail - gen` | An explicit decision variable |
+
+**The existing Curtailment column keeps its name.** It is correct for what it
+measures, it is already in archived runs, and renaming it would break the
+comparison view for no gain.
+
+**They are not unified.** Energy never produced and energy produced-then-destroyed
+are different physical events with different costs, and collapsing them would make
+the Curtailment column mean "sometimes free, sometimes $1,000/MWh" depending on
+which plant it came from.
+
+**"Free spill", used in [Map: Model semantics](../model_plan.md) for what is here
+called curtailment, is retired.** CONTEXT.md records this explicitly so the older
+document does not mislead.
+
+**3. Sign convention confirmed:** `sum(gen) + unserved - spill == demand`. Spill
+enters negatively because it is generation that did not serve demand, which reads
+as the direct mirror of `unserved` on the same side of the equation.

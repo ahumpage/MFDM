@@ -2,6 +2,11 @@
 
 `wayfinder:map` — the map for this effort. Tickets are the files in `ramping_plan/`.
 
+**Status: closed.** Every ticket is resolved. The spec is
+[docs/ramping_semantics.md](../ramping_semantics.md), and — unlike the plan below
+anticipated — the implementation landed in the same effort. See
+[What actually happened](#what-actually-happened).
+
 ## Destination
 
 A written spec, `docs/ramping_semantics.md`, stating what ramping *means* in MFDM:
@@ -20,6 +25,8 @@ afterwards, fitting the code to the spec; this map produces no code.
   [Correct the tracker doc](ramping_plan/09-fix-tracker-doc.md) fixes it.
 - **Plan only.** Every ticket resolves a decision. No prototypes, no implementation,
   not even throwaway code. The pull to start writing the model means the map is done.
+  _Overtaken: Alice asked for planning and implementation together. See
+  [What actually happened](#what-actually-happened)._
 - **Audience**: Alice reads and implements. The spec is decisions + rationale +
   worked numbers, not agent-ready acceptance criteria.
 - **Skills every session should call**: `grilling` and `domain-modeling`. Write terms
@@ -38,6 +45,7 @@ afterwards, fitting the code to the spec; this map produces no code.
   edit, recorded here so it is not lost.
 - **On close**: assemble `docs/ramping_semantics.md`, add a one-line pointer to it in
   `AGENTS.md`, and update `README.md` per the Origin outline's final line.
+  _Done, plus `CONTEXT.md`, the dashboard and the tracker doc._
 
 ### Settled while charting
 
@@ -56,6 +64,14 @@ Premises, not steps on the route. Recorded so no ticket reopens them by accident
   `spill[t] >= 0` priced at VOLL, mirroring `unserved`. The model stays
   always-feasible. Caveat on record: spill at VOLL makes shedding and dumping equally
   bad at the margin, and lets one stuck hour dominate the run's objective.
+  _**Overturned in part.** The spill variable and the balance are as described, but
+  pricing it at VOLL is wrong, and the caveat understated it: shedding and dumping are
+  not equally bad, dumping is strictly worse, so spill never happens at all.
+  `SPILL_COST` is $1,000. See [05](ramping_plan/05-spill-hour-price.md).
+  The "always feasible" claim does hold, though not for the reason given here — the
+  all-zeros dispatch satisfies every constraint, so feasibility was never in doubt.
+  A related trap that is **not** about feasibility is described in
+  [What actually happened](#what-actually-happened)._
 - **Ramping is symmetric.** One `Ramp_efficiency` column and one `Ramp_time` column,
   so up and down cost the same per MWh and share one rate limit. Splitting them is a
   later effort.
@@ -66,41 +82,109 @@ Premises, not steps on the route. Recorded so no ticket reopens them by accident
 
 <!-- one line per closed ticket -->
 
-_None yet._
+- **[00 Research](ramping_plan/00-research-ramp-cost-and-prices.md)** — use a linear
+  penalty on the ramp delta to keep it an LP; minimise production cost, not any one
+  marginal cost, which is why the dual becomes the honest price.
+- **[01 Ramp time](ramping_plan/01-ramp-time-meaning.md)** — *dissolved.*
+  `plants.csv` now carries `Ramp_rate (MW/hr)` directly, so there is nothing to
+  derive, and the rates bind.
+- **[02 Ramp cost form](ramping_plan/02-ramp-cost-form.md)** — per-MWh-of-ramp
+  adder, `fuel/ramp_eff - fuel/eff`, charged on `V_up + V_dwn`. Ramped MWh charged
+  twice, deliberately. Premium sits outside the merit order.
+- **[03 Spill mechanism](ramping_plan/03-spill-mechanism.md)** — system-wide
+  `spill[t]`, not per plant. Spill and curtailment stay distinct terms, both kept;
+  `CONTEXT.md` created.
+- **[04 Clearing price](ramping_plan/04-clearing-price-meaning.md)** — the dual
+  becomes canonical. Merit order survives as the `Highest Running Cost` diagnostic.
+  Mismatch counter deleted. Supersedes the Model-semantics premise.
+- **[05 Spill hour price](ramping_plan/05-spill-hour-price.md)** — `-SPILL_COST`,
+  falling out of the dual with no special case. **`SPILL_COST` is $1,000, not VOLL**:
+  at VOLL spill is strictly dominated by shedding load and never occurs.
+- **[06 Merit order invariant](ramping_plan/06-merit-order-invariant.md)** — demoted
+  to a warning, with a ramp ceiling and floor. No invariant survives worth raising
+  on; the objective reconciliation becomes the real gate instead.
+- **[07 Output schema](ramping_plan/07-output-schema.md)** — system-total ramp
+  columns; `Ramp Cost` is the premium alone; `Production Cost` unchanged so the four
+  objective components stay separable, and the reconciliation is now checked.
+- **[08 Worked example](ramping_plan/08-worked-example.md)** — two runnable
+  3-hour fixtures under `docs/examples/ramping/`, all arithmetic verified by running
+  them.
+- **[09 Tracker doc](ramping_plan/09-fix-tracker-doc.md)** — rewritten for local
+  markdown, whole document rather than just the Wayfinding section.
 
-## Not yet specified
+## What actually happened
 
-In scope, not yet sharp enough to ticket.
+Recorded because it departs from the plan in three ways a future reader should not
+have to reconstruct.
 
-- How `plant_summary.csv`'s "Hours Setting Price" survives. It matches a plant by
-  `|clearing_price - marginal_cost| < 1e-6` (`MFDM.py:496`), which assumes the price is
-  always some plant's marginal cost. Graduates once
-  [What the clearing price represents](ramping_plan/04-clearing-price-meaning.md) lands.
-- Whether renewables should ever pay a ramp cost. Today they would pay zero, but only
-  because their fuel price is zero, not because anyone decided it. A solar farm being
-  curtailed and un-curtailed is a large hour-to-hour swing at no charge. Lucky, not
-  chosen.
-- Whether ramp cost should reorder the merit-order stack itself, or sit outside it as a
-  separate charge. Hangs on [How ramping efficiency becomes a
-  cost](ramping_plan/02-ramp-cost-form.md).
-- Whether VOLL remains the right spill price once the objective inflation is visible in
-  a real run.
+**The map said "plan only, no code". The effort produced the code as well.** Alice
+asked for planning *and* implementation in one pass, so the tickets were resolved
+as decisions in a single session rather than one session each, and the model was
+fitted to the spec immediately. The spec is still the artefact; it is just no
+longer ahead of the code.
+
+**Two decisions were overturned by measurement, not by argument.**
+
+- *Spill priced at VOLL* was a settled premise on this map. It is wrong: it makes
+  spill strictly dominated by shedding load, so the mechanism never fires and the
+  model blacks out demand rather than dump surplus. Found by building the fixture
+  and comparing objectives. `SPILL_COST` is now $1,000.
+- *`Ramp_time (hrs)`* — the entire subject of ticket 01 — no longer exists in
+  `plants.csv`. The input file changed after the map was charted.
+
+**One failure mode nobody had ticketed.** A ramp-down floor and an availability
+ceiling can be jointly unsatisfiable at any positive output, when a wind or solar
+profile collapses faster than the plant's ramp rate. The plant is then trapped by
+its own good hours: it must generate far below its peak or be stranded above its
+ceiling. Handled with a cost-free ramp-down allowance bounded by the drop in the
+plant's own availability.
+
+Worth recording precisely, because the first attempt at this got it wrong and
+called it *infeasibility*. It is not: the all-zeros dispatch satisfies every ramp
+constraint, so the LP can always retreat to it and price the demand at VOLL. The
+failure is silent and expensive rather than loud. On a hostile fixture — a 500 MW
+solar farm limited to 10 MW/hr, resource falling to zero after one hour —
+removing the allowance takes the objective from $4,400 to $2,415,010 and leaves
+58% of demand unserved. Caught by testing the claim rather than asserting it.
+
+It never binds on current inputs; it exists so that editing one number in
+`plants.csv` cannot silently wreck the dispatch.
+
+**One knock-on break.** `run_archive/runstore.py` read `Hours Setting Price` by
+name and threw `KeyError` on the first ramping run, silently skipping the archive.
+Fixed, with the KPI key left unchanged so old and new runs still diff.
+
+## Still open after this effort
+
+Was "Not yet specified". These are now genuinely out of the effort's scope rather
+than merely unsharp, and each is recorded in the spec's Known gaps section.
+
+- **Whether renewables should pay a ramp cost.** They pay zero today only because
+  their fuel price is zero. Their ramp *rates* are equally a placeholder, set to
+  nameplate so nothing binds. Lucky, still not chosen.
+- **Whether `SPILL_COST` should be $1,000.** It has the two properties it needs —
+  above every marginal cost, below VOLL — and no more justification than that. It
+  dominates the objective whenever it fires ($50,000 of a $55,600 fixture).
+- **Ramp and spill KPIs in `run_archive`.** Still blocked on the KPI-versioning
+  question parked in [extra_plan.md](extra_plan.md). The consequence is now
+  concrete: a run diff reports +2.5% on `production_cost` where true system cost
+  rose +16.4%.
+- **`inputs/plants.csv` header.** `Ramp_efficiency($/hr)` holds MWh/MWhTh. The
+  model locates the column by prefix, so Alice can rename it to
+  `Ramp_efficiency (MWh/MWhTh)` safely and without touching code.
 
 ## Out of scope
 
 Past the destination. Returns only as a fresh effort.
 
-- **`dashboard/dashboard.py`.** Includes two now-false claims to users that ramp rates
-  are not modelled (lines 580 and 751) and any surfacing of new columns. A follow-on
-  chore, not a decision.
-- **`run_archive/` KPIs.** Adding ramp and spill KPIs drags in the unresolved
-  KPI-versioning decision already parked in [extra_plan.md](extra_plan.md).
-- **Writing tests.** [The worked example](ramping_plan/08-worked-example.md) specifies
-  the example the spec must contain; turning it into a test file is implementation.
-- **Unit commitment, minimum generation, must-run, start-up costs.** Ramping's natural
-  neighbours, all absent from the model. New work, not ambiguity to resolve.
+- **Writing tests.** [The worked example](ramping_plan/08-worked-example.md)
+  specifies the example the spec must contain and it is now two runnable input
+  folders, but turning them into assertions is still not done.
+- **Unit commitment, minimum generation, must-run, start-up costs.** Ramping's
+  natural neighbours, all absent from the model. New work, not ambiguity to resolve.
+- **Splitting ramping into separate up and down rates and premiums.** One
+  `Ramp_rate` and one `Ramp_efficiency` serve both directions.
 - **Editing `inputs/plants.csv`.** Alice's file; see Notes.
-- **Implementing the spec.** Fitted to the spec after this map closes.
 
 ## Origin
 
