@@ -1,6 +1,6 @@
-﻿Plant,Technology,Fuel,Capacity (MW),Efficiency (MWh/MWhTh),VOM ($/MWh),Ramptime (hrs),Rampcost($/hr)
-Plant 1,Solar,None,500,1,1,0,0
-Plant 2,Wind,None,300,1,2,0,0
-Plant 3,Coal,Coal,100,0.4,2,0.5,50
-Plant 4,Gas,Gas,600,0.5,2,1,30
-Plant 5,Gas,Gas,1000,0.3,10,0.2,25
+﻿Plant,Technology,Fuel,Capacity (MW),Efficiency (MWh/MWhTh),VOM ($/MWh),Ramp_time (hrs),Ramp_efficiency($/hr)
+Plant 1,Solar,None,500,1,1,0,1
+Plant 2,Wind,None,300,1,2,0,1
+Plant 3,Coal,Coal,100,0.4,2,0.5,0.3
+Plant 4,Gas,Gas,600,0.5,2,1,0.2
+Plant 5,Gas,Gas,1000,0.3,10,0.2,0.1
