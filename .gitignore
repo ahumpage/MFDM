@@ -12,3 +12,6 @@ run_archive/
 
 # Personal agent tooling, not shared with the repo
 .agents/
+
+#ignore the virtual environment folder
+.venv/

@@ -1,4 +1,4 @@
-﻿Plant,Technology,Fuel,Capacity (MW),Efficiency (MWh/MWhTh),VOM ($/MWh),Ramp_rate (MW/hr),Ramp_efficiency(MWh/MWhTh)
+Plant,Technology,Fuel,Capacity (MW),Efficiency (MWh/MWhTh),VOM ($/MWh),Ramp_rate (MW/hr),Ramp_efficiency(MWh/MWhTh)
 Plant 1,Solar,None,500,1,1,,
 Plant 2,Wind,None,300,1,2,,
 Plant 3,Coal,Coal,100,0.6,2,50,0.1
