@@ -103,10 +103,9 @@ figure is the low end of the European Commission JRC estimate for Greece; see
 - $C(p)$ — marginal cost of 1 MWh from plant $p$ ($/MWh)
 - $\eta(p)$ — efficiency (MWh/MWhTh)
 - $\eta_r(p)$ — ramping efficiency, the efficiency while the plant is moving (MWh/MWhTh). Never better than $\eta(p)$.
-- $R(p)$ — ramp rate, the most the plant may move between adjacent hours (MW/hr)
+- $R(p)$ — ramp rate, the most the plant may move between adjacent hours (MW/hr). Left blank in `plants.csv` the plant is unconstrained, moving freely and paying no premium, which is how every plant in `inputs/plants.csv` is currently set.
 - $K(p)$ — ramp premium, the extra cost of a moved MWh over a steady one ($/MWh)
 - $D(t)$ — demand in hour $t$ (MWh)
-- $F(p,t)$ — cost-free ramp-down allowance, $\max(0,\ A(p,t-1) - A(p,t))$
 
 $$C(p) = \frac{\text{fuel price}(p)}{\eta(p)} + \text{VOM}(p)$$
 
@@ -141,11 +140,11 @@ $$g(p,t) \leq A(p,t) \qquad \forall p, t$$
 
 Ramping, one pair per plant per hour after the first. Hour 1 has no predecessor,
 so no ramp constraint applies to it and plants start wherever they like free of
-charge:
+charge. Up and down are symmetric — neither direction gets an allowance:
 
 $$g(p,t) - g(p,t-1) \leq V_{up}(p,t) \qquad \forall p,\ t > 1$$
 
-$$g(p,t-1) - g(p,t) \leq V_{dwn}(p,t) + F(p,t) \qquad \forall p,\ t > 1$$
+$$g(p,t-1) - g(p,t) \leq V_{dwn}(p,t) \qquad \forall p,\ t > 1$$
 
 Ramp rate limits, applied as upper bounds on the movement variables:
 

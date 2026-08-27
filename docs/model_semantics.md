@@ -213,32 +213,28 @@ all-zeros dispatch satisfies every ramp constraint, so the LP can always retreat
 towards it and price the demand at LoL instead. The model does not fail; it
 returns an absurdly expensive answer and says nothing.
 
-The model therefore allows a cost-free ramp-down beyond the rate limit, bounded by
-the drop in the plant's own availability:
-
-```
-gen[p][t-1] - gen[p][t] <= ramp_down[p][t] + forced_down[p][t]
-forced_down[p][t]        = max(0, avail[p][t-1] - avail[p][t])
-```
-
-A plant is never charged for a ramp down that the weather forced on it, and never
-has to hold back in a good hour to protect itself against a later collapse.
-
 Measured on a deliberately hostile fixture — a 500 MW solar farm limited to
 10 MW/hr whose resource falls to zero after one hour:
 
 | | Objective | Demand served | Solar used |
 |---|---:|---:|---:|
-| With the allowance | **$4,400** | 100% | 400 MWh |
-| Without it | **$2,415,010** | 42% | 10 MWh |
+| Solar left unconstrained | **$4,400** | 100% | 400 MWh |
+| Solar limited to 10 MW/hr | **$2,415,010** | 42% | 10 MWh |
 
-Without the allowance the solar farm may use 10 MWh of a 500 MWh peak, because
-anything more would strand it above its hour-2 ceiling, and 58% of demand goes
-unserved at LoL.
+Constrained, the solar farm may use 10 MWh of a 500 MWh peak, because anything
+more would strand it above its hour-2 ceiling, and 58% of demand goes unserved
+at LoL.
 
-On the current inputs this never binds, because wind and solar both have a ramp
-rate equal to nameplate. It exists so that editing one number in `plants.csv`
-cannot silently wreck the dispatch.
+The model does not correct for this. An earlier version carried a cost-free
+ramp-down allowance bounded by the drop in the plant's own availability, so that
+a plant was never charged for a ramp down the weather forced on it. That was
+removed when ramping was simplified, and ramp up and ramp down are now
+symmetric.
+
+What avoids the trap instead is the input convention: **profiled plants are
+left unconstrained.** A blank `Ramp_rate` in `plants.csv` means no limit, and
+every plant in `inputs/plants.csv` is currently blank. Giving a wind or solar
+plant a finite ramp rate re-arms the trap, and nothing in the model will say so.
 
 ---
 
@@ -337,7 +333,7 @@ The ceiling and floor it measures against are now:
 
 ```
 ceiling[p][t] = min( avail[p][t],  gen[p][t-1] + ramp_rate(p) )
-floor[p][t]   = max( 0,  gen[p][t-1] - ramp_rate(p) - forced_down[p][t] )
+floor[p][t]   = max( 0,  gen[p][t-1] - ramp_rate(p) )
 ```
 
 with hour 1 falling back to availability and zero. A plant sitting on its floor

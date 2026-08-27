@@ -37,6 +37,11 @@ LoL = 8300.0
 # docs/model_semantics.md#why-spill-is-priced-at-1000mwh-and-not-at-lol.
 SPILL_COST = 1000.0
 
+# A blank ramp rate in plants.csv means "no limit". Represented as a large
+# multiple of nameplate rather than as infinity, so it survives the round trip
+# through plant_summary.csv and into the dashboard.
+UNLIMITED_RAMP_FACTOR = 1e6
+
 # Technologies limited by an hourly resource profile. The value is the token
 # looked for in the profiles.csv column headers.
 PROFILE_TECHNOLOGIES = {
@@ -123,7 +128,7 @@ def build_parameters(plants, fuel, demand, profile):
         # A blank ramp rate means the plant is unconstrained and never pays a
         # premium, so its ramping efficiency is its ordinary efficiency.
         if row[rate_col] is None or row[rate_col] == '':
-            ramp_rate[p] = capacity[p] * 1e6 
+            ramp_rate[p] = capacity[p] * UNLIMITED_RAMP_FACTOR
             ramp_efficiency[p] = efficiency[p]
 
         else:
@@ -174,13 +179,6 @@ def build_parameters(plants, fuel, demand, profile):
     ramp_rate_vec = np.array([ramp_rate[p] for p in PLANTS], dtype=float)
     ramp_cost_vec = np.array([ramp_cost[p] for p in PLANTS], dtype=float)
 
-    # Cost-free ramp-down headroom, equal to the drop in the plant's own
-    # availability, so a profiled plant is never trapped by its own good
-    # hours. Column 0 is zero: hour 1 has no predecessor. See
-    # docs/model_semantics.md.
-    #forced_down = np.zeros_like(avail)
-   # forced_down[:, 1:] = np.maximum(0.0, avail[:, :-1] - avail[:, 1:])
-
     # Dict view, derived from `avail` so the two agree by construction.
     availability = {p: dict(zip(HOURS, avail[i]))
                     for i, p in enumerate(PLANTS)}
@@ -210,7 +208,6 @@ def build_parameters(plants, fuel, demand, profile):
         "mc_vec": mc_vec,
         "ramp_rate_vec": ramp_rate_vec,
         "ramp_cost_vec": ramp_cost_vec,
-       # "forced_down": forced_down,
         "demand_vec": demand_vec,
         "profiled_mask": profiled_mask,
     }
@@ -353,9 +350,6 @@ def build_and_solve(params):
         "rampdown_{}_{}".format(p.replace(" ", "_"), t),
         lowBound=0, upBound=params["ramp_rate"][p]) for t in RAMP_HOURS} for p in PLANTS}
 
-   # forced_down = {p: dict(zip(HOURS, params["forced_down"][i]))
-         #          for i, p in enumerate(PLANTS)}
-
     prob += (
         pulp.lpSum(params["marginal_cost"][p] * gen[p][t] for p in PLANTS for t in HOURS)
         + pulp.lpSum(LoL * unserved[t] for t in HOURS)
@@ -393,9 +387,9 @@ def build_and_solve(params):
                 "rampup_{}_{}".format(p.replace(" ", "_"), t),
             )
             prob += (
-                gen[p][prev] - gen[p][t] <= ramp_down[p][t], 
+                gen[p][prev] - gen[p][t] <= ramp_down[p][t],
                 "rampdown_{}_{}".format(p.replace(" ", "_"), t),
-            ) #+ forced_down[p][t],
+            )
 
     n_vars = (len(PLANTS) * len(HOURS)          # gen
               + 2 * len(HOURS)                   # unserved, spill
@@ -571,9 +565,7 @@ def dispatch_ceiling(params, output):
 def dispatch_floor(params, output):
     """The least each plant could have generated in each hour."""
     floor = np.zeros_like(params["avail"])
-    floor[:, 1:] = (output[:, :-1]
-                    - params["ramp_rate_vec"][:, None])
-                   #- params["forced_down"][:, 1:])
+    floor[:, 1:] = output[:, :-1] - params["ramp_rate_vec"][:, None]
     return np.maximum(0.0, floor)
 
 

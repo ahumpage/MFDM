@@ -167,14 +167,6 @@ this always means **the premium alone**, never the total cost of ramped energy.
 Floors are what make spill possible and what make a genuinely optimal dispatch
 look like a merit-order violation.
 
-**Forced ramp down** — a cost-free allowance to ramp down faster than the rate
-limit, bounded by the collapse in the plant's own availability. Without it, a
-profiled plant whose resource falls faster than its ramp rate is trapped by its
-own good hours: it must generate far below its peak, or be stranded above its
-ceiling next hour. Note this is not an infeasibility — the model can always
-retreat to generating nothing and price the demand at LoL, which is why the
-failure is silent and expensive rather than loud.
-
 ---
 
 ## Runs
