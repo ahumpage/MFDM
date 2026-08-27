@@ -61,7 +61,7 @@ Premises, not steps on the route. Recorded so no ticket reopens them by accident
   every plant starts wherever it likes, free of charge. The horizon does not wrap.
   `HOURS` must be ascending and contiguous — true of `demand.csv` today (744 rows,
   hours 1–744, sorted, no gaps, no duplicates) but unvalidated, since `HOURS` is taken
-  straight from row order (`MFDM.py:161`). `build_parameters` gains that check at
+  straight from row order. `build_parameters` gains that check at
   implementation time.
 - **Ramp-down infeasibility is solved with a priced spill variable.** A ramp-down
   limit puts a *floor* under a plant, which can force total generation above demand
@@ -82,7 +82,7 @@ Premises, not steps on the route. Recorded so no ticket reopens them by accident
   so up and down cost the same per MWh and share one rate limit. Splitting them is a
   later effort.
 - **Ramping efficiency never exceeds normal efficiency**, so ramp cost is never
-  negative. Validated on load, mirroring the existing efficiency guard (`MFDM.py:193`).
+  negative. Validated on load, mirroring the existing efficiency guard.
 
 ## Decisions so far
 

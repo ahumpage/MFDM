@@ -13,7 +13,7 @@ because a cheap plant can legitimately sit idle while an expensive one runs. Two
 reasons in this model:
 
 - A profiled wind or solar plant is capped by its hourly resource, far below
-  nameplate (MFDM.py:197). It is not "skipped"; it is exhausted.
+  nameplate. It is not "skipped"; it is exhausted.
 - Ties. Two plants on identical marginal cost can split output arbitrarily and the
   solver's choice between them is not meaningful.
 

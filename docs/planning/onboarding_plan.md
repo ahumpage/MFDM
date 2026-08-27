@@ -73,7 +73,7 @@ ticket and the Origin disagree, the ticket is right.
   merit-order-check status are model-wide, not ramping-specific. Writing model semantics
   is largely a **rehoming** problem.
 - **`model/MFDM.py` is more testable than it looks.** `build_parameters`,
-  `build_and_solve`, `build_results` and `build_summary` are directly callable with
+  `build_and_solve`, `build_hourly_results` and `build_plant_summary` are directly callable with
   in-memory arguments. Only `load_data()` is bound to module globals, which
   `use_directories` mutates. The `check_*` functions and `report` return `None` and
   communicate solely by `print`. `MFDM.py` imports no dash and no plotly.

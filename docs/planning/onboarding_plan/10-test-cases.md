@@ -27,7 +27,7 @@ The Origin's six cases are all still valid, and each maps onto behaviour that ex
 | Plant at capacity | the `cap_{plant}_{t}` constraint binds; price steps to the next plant |
 | Equal-cost plants | degeneracy — the LP may split arbitrarily, so what is even assertable? |
 | Resource-limited wind/solar | `build_profile_factors`, availability as a ceiling |
-| Scarcity and VOLL | `unserved[t] > 0`, price pinned to VOLL, `describe_price_setter` |
+| Scarcity and VOLL | `unserved[t] > 0`, price pinned to VOLL, `name_last_in_stack` |
 | Zero demand | price with nothing running; `Highest Running Cost` falls back to `0.0` |
 
 **What the Origin could not know to ask for**, because it thought ramping was future work:
@@ -62,7 +62,7 @@ The Origin's six cases are all still valid, and each maps onto behaviour that ex
 - **What is asserted for equal-cost plants.** The LP may split output arbitrarily between
   them, so total generation and total cost are assertable but per-plant output is not.
   Decide the assertion, or drop the case.
-- **Are the QA checks tested, or are they the tests?** `check_merit_order` explicitly
+- **Are the QA checks tested, or are they the tests?** `warn_merit_order_departures` explicitly
   gave up its authority under ramping — its own docstring says it *"no longer proves a
   bug"*. So it is a warning that a test cannot assert on as a correctness gate. Decide
   what, if anything, replaces it.

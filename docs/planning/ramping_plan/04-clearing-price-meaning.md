@@ -15,9 +15,9 @@ that breaks a premise [Map: Model semantics](../model_plan.md) explicitly settle
 
 Today the model reports two prices per hour and expects them to agree:
 
-- **Merit order** (`MFDM.py:415`): the marginal cost of the most expensive plant
+- **Merit order**: the marginal cost of the most expensive plant
   running, or VOLL in a scarce hour.
-- **The dual** (`MFDM.py:429`): the shadow price of the energy balance.
+- **The dual**: the shadow price of the energy balance.
 
 They agree because, with every hour independent, the cost of one more MWh in hour *t*
 is exactly some plant's marginal cost. Ramping destroys that. Once moving a plant costs
@@ -40,7 +40,7 @@ Settle:
 - What replaces the mismatch counter. A cross-check between two things that are no
   longer supposed to be equal is not a check.
 - Whether the price is still a *market* price the model can defend. `Market Cost ($)`
-  (`MFDM.py:457`) and every downstream figure — load-weighted price, producer surplus
+  and every downstream figure — load-weighted price, producer surplus
   — are computed from whichever column wins here.
 - Explicitly: does this overturn the Model-semantics premise, or is that premise
   scoped to the ramp-free model and simply superseded?
@@ -56,7 +56,7 @@ it is what a price is for.
 `Highest Running Cost ($/MWh)` — the name of what it actually measures, the
 marginal cost of the most expensive plant generating. It is a "who was last in the
 stack" diagnostic and is documented as not a price. It is still used by
-`check_merit_order` and by `plant_summary.csv`, neither of which wants a price.
+`warn_merit_order_departures` and by `plant_summary.csv`, neither of which wants a price.
 
 **The `Shadow Price` column is removed**, because it has become the clearing
 price. Nothing is reported twice.

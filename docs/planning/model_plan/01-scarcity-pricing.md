@@ -14,8 +14,8 @@ mechanics:
 - What is the shortfall priced at, and where does the number come from — a real
   market cap, or an arbitrary round figure chosen to sit clearly above every plant?
 - Is it a constant, or an input in `inputs/`? An input is honest but adds a file;
-  a constant beside `TOL` (MFDM.py:83) is simpler to read.
-- Does `check_feasibility` (MFDM.py:294) get deleted, or demoted to a warning? It
+  a constant beside `TOL` is simpler to read.
+- Does `check_feasibility` get deleted, or demoted to a warning? It
   currently gives a much clearer diagnostic than a solved-but-scarce result would.
   Deleting it trades an explicit error for a number you have to notice.
 - Is unserved energy one variable per hour, or does it need to distinguish

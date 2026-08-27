@@ -9,7 +9,7 @@
 ## Question
 
 The QA list asks that "shadow price should match marginal cost". The model already
-contradicts this: `build_results` counts hours where the dual and the merit-order
+contradicts this: `build_hourly_results` counts hours where the dual and the merit-order
 price differ by more than `1e-4` and prints them as an expected note, not an error
 (MFDM.py:400-403), on the grounds that they diverge in degenerate hours where a plant
 sits exactly on its cap.

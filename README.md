@@ -65,8 +65,15 @@ document are run.
 | `LoL` | $8,300/MWh | The cost of lost load — what unserved energy is priced at. Appears as $\text{LoL}$ in the objective below. |
 | `SPILL_COST` | $1,000/MWh | What energy that is generated and thrown away is charged. Appears as $\text{SPILL}$ below. |
 
-Both are set at the top of `model/MFDM.py`. Neither is a physical quantity;
-`docs/model_semantics.md` explains why each is the value it is.
+Both are set at the top of `model/MFDM.py`. Neither is a physical quantity.
+
+`LoL` must stay well above the marginal cost of the most expensive plant. If it
+drops below, the solver sheds load rather than running that plant, and nothing
+errors — the dispatch just quietly goes dark in expensive hours. The $8,300/MWh
+figure is the low end of the European Commission JRC estimate for Greece; see
+`docs/research/scarcity_pricing.md`.
+
+`docs/model_semantics.md` explains why `SPILL_COST` is $1,000/MWh and not `LoL`.
 
 ## Troubleshooting
 

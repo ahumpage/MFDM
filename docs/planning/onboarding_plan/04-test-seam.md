@@ -20,15 +20,15 @@ interface a test can drive.** Decide what the seam is.
 The file is more testable than its size suggests, but the seams are uneven:
 
 - **Directly callable with in-memory arguments**, no file I/O: `build_parameters(plants,
-  fuel, demand, profile)`, `build_and_solve(par)`, `build_results(par, prob, gen,
-  unserved, spill)`, `build_summary(par, results)`, plus `dispatch_ceiling`,
-  `dispatch_floor`, `check_hours`, `find_column`, `build_profile_factors`,
-  `describe_price_setter`.
+  fuel, demand, profile)`, `build_and_solve(params)`, `build_hourly_results(params, prob, gen,
+  unserved, spill)`, `build_plant_summary(params, results)`, plus `dispatch_ceiling`,
+  `dispatch_floor`, `check_horizon`, `find_column`, `build_profile_factors`,
+  `name_last_in_stack`.
 - **Bound to module globals**: `load_data()` takes no arguments and reads the six path
   constants. `use_directories(inputs, results)` mutates them via `global`. Its docstring
   states this is deliberate — it keeps the common case free of plumbing.
-- **Observable only through stdout**: `check_demand`, `check_capacity_adequacy`,
-  `check_merit_order` and `report` all return `None` and communicate exclusively by
+- **Observable only through stdout**: `warn_nonpositive_demand`, `warn_capacity_shortfall`,
+  `warn_merit_order_departures` and `report` all return `None` and communicate exclusively by
   `print`. The merit-order check, the objective reconciliation and the energy-balance
   check — the three things most worth asserting on — are all in this group.
 - **`main(argv=None)` returns `None`.** It parses args, mutates globals, writes CSVs and
@@ -45,7 +45,7 @@ assertions.
 ### What has to be decided
 
 - **What is "the model interface" for test purposes?** Three candidates:
-  1. **Compose the pipeline** — `build_parameters` -> `build_and_solve` -> `build_results`.
+  1. **Compose the pipeline** — `build_parameters` -> `build_and_solve` -> `build_hourly_results`.
      No file I/O, fast, but a test then knows the four-stage shape, which is an
      implementation detail that ramping already changed once.
   2. **Run `main()` against a fixture directory** and read the written CSVs. Closest to

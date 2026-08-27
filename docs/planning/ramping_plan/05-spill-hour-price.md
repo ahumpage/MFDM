@@ -33,7 +33,7 @@ Settle:
   fleet with mixed ramp constraints, and the dual there has no unique value.
 - What `Market Cost ($)` means when the price is negative — the model would be
   reporting that consumers were paid to take power.
-- How `describe_price_setter` (`MFDM.py:654`) names the setter when nothing is setting
+- How `name_last_in_stack` names the setter when nothing is setting
   it.
 
 ## Decision
@@ -85,6 +85,6 @@ price does. Not observed in any run to date.
 consumers were paid to take power. `report()` prints an explicit note whenever any
 hour has a negative price, so the figure is never met without warning.
 
-**`describe_price_setter` gains a `-SPILL_COST` case** naming "spilled energy". It
+**`name_last_in_stack` gains a `-SPILL_COST` case** naming "spilled energy". It
 is only used for the *diagnostic* column now, never for the clearing price, so its
 ordinary behaviour is unaffected.

@@ -112,7 +112,7 @@ PATH hits the `try/except` in `MFDM.main` and gets an unexplained warning. It is
 pip dependency, so a comment is the only honest place for it. It stays out of the README
 because run archiving is not expected to remain a committed, every-run concern -
 `run_archive/` is already gitignored - and the Quickstart should not carry a caveat with
-a short shelf life. The comment names `--no-archive` (`MFDM.py:1158`) so a reader who
+a short shelf life. The comment names `--no-archive` so a reader who
 hits the warning is told the remedy in the same line. **This closes the map's *Not yet
 specified* entry on `git` as far as declaration goes; what *should* happen when `git` is
 absent, beyond the current warning, remains open.**

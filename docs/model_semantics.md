@@ -74,7 +74,7 @@ This is visible in the worked example below, where a plant moves 60 MWh in hour 
 for nothing and then pays $200 to move 10 MWh in hour 2.
 
 Because the constraints link each hour to *the previous row of `demand.csv`*, the
-hours must be ascending, contiguous and free of duplicates. `check_hours` enforces
+hours must be ascending, contiguous and free of duplicates. `check_horizon` enforces
 this. Before ramping it did not matter; now a stray sort order would quietly
 constrain the wrong pairs of hours and still solve.
 
@@ -277,7 +277,7 @@ up and then back down again. No plant offers $160.40. The system does.
 `Highest Running Cost ($/MWh)` is the old merit-order calculation under the name
 of what it actually measures: the marginal cost of the most expensive plant
 generating. It is a "who was last in the stack" diagnostic and **it is not a
-price**. It is used by `check_merit_order` and by `plant_summary.csv`, and must
+price**. It is used by `warn_merit_order_departures` and by `plant_summary.csv`, and must
 not be used for revenue or surplus.
 
 ### The mismatch counter is gone
@@ -302,9 +302,9 @@ When the price is negative, `Market Cost ($)` for that hour is negative too: the
 model is reporting that consumers were paid to take power. `report()` prints a
 note whenever this happens so the figure is never encountered without warning.
 
-### `describe_price_setter` under a dual
+### `name_last_in_stack` under a dual
 
-`describe_price_setter` is only used for the *diagnostic* column, never for the
+`name_last_in_stack` is only used for the *diagnostic* column, never for the
 clearing price, so it still resolves to a plant name in the ordinary case. It
 gains a `-SPILL_COST` case naming "spilled energy", and otherwise falls back to
 "something at $X/MWh" — which is now the honest answer far more often.
@@ -313,7 +313,7 @@ gains a `-SPILL_COST` case naming "spilled energy", and otherwise falls back to
 
 ## 6. The merit-order check gives up its authority
 
-`check_merit_order` used to **raise**, and `main` treated it as fatal. Its
+`warn_merit_order_departures` used to **raise**, and `main` treated it as fatal. Its
 invariant: no plant may generate strictly below its dispatch ceiling while
 something strictly more expensive is generating.
 
@@ -385,7 +385,7 @@ four must be present; a missing one is a `FileNotFoundError` naming the path.
 
 | Column | Meaning |
 |---|---|
-| `Hour` | The hour number. Must be ascending, contiguous and free of duplicates — `check_hours` enforces this, because the ramp constraints link each row to the one above it. |
+| `Hour` | The hour number. Must be ascending, contiguous and free of duplicates — `check_horizon` enforces this, because the ramp constraints link each row to the one above it. |
 | `Demand in region 1 (MWh)` | Demand to be served in that hour. |
 
 The horizon is however many rows this file has, currently 744. It does not wrap:

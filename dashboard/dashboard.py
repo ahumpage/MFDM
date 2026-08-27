@@ -1,32 +1,3 @@
-"""
-Dispatch Model Dashboard
-========================
-
-An interactive Dash app for exploring the output of model/MFDM.py.
-
-Run model/MFDM.py first to produce dispatch_results.csv and plant_summary.csv
-in results/, then:
-
-    python dashboard/dashboard.py
-
-and open http://127.0.0.1:8050 in a browser.
-
-Controls
-    hour range slider   zoom to any window of hours
-    preset buttons      first day, first week, full period
-    resolution          hourly, daily mean or weekly mean
-    plant toggles       show or hide each plant
-    overlay toggles     demand line, marginal cost lines, highest running cost
-
-Note on prices: the clearing price is the dual of the energy balance, which
-under ramping is no longer equal to any plant's marginal cost. The old
-merit-order figure is still available as "Highest running cost", a diagnostic
-rather than a price. See docs/ramping_semantics.md.
-
-Note on the duration curves: they always use hourly data, because averaging
-over days or weeks flattens the peaks that a duration curve exists to show.
-"""
-
 from pathlib import Path
 import sys
 
@@ -35,15 +6,12 @@ import pandas as pd
 import plotly.graph_objects as go
 from dash import Dash, dcc, html, Input, Output, State, callback_context, dash_table
 
-# runstore lives in run_archive/, which is a sibling folder rather than a
-# package, so it has to be put on the import path before importing it.
+# runstore lives in run_archive/, a sibling folder rather than a package.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "run_archive"))
 import runstore
 
 
-# --------------------------------------------------------------------------
 # Configuration
-# --------------------------------------------------------------------------
 
 BASE_DIR = Path(__file__).resolve().parent          # dashboard/
 REPO_ROOT = BASE_DIR.parent
@@ -86,10 +54,7 @@ RGBA_PRICE_AREA = "rgba(213, 94, 0, 0.20)"
 
 DEMAND_COL = "Demand (MWh)"
 PRICE_COL = "Clearing Price ($/MWh)"
-# The old merit-order price, kept as a diagnostic. It is the marginal cost of
-# the most expensive plant running, which is no longer the clearing price:
-# ramping made the objective intertemporal, so the price is the energy-balance
-# dual. See docs/ramping_semantics.md.
+# A diagnostic, not a price. See docs/model_semantics.md.
 STACK_COL = "Highest Running Cost ($/MWh)"
 PROD_COST_COL = "Production Cost ($)"
 MARKET_COST_COL = "Market Cost ($)"
@@ -111,14 +76,10 @@ PLOT_BG = "#FFFFFF"
 GRID = "#E6E6E6"
 
 
-# --------------------------------------------------------------------------
 # Data loading
-# --------------------------------------------------------------------------
 
 def lighten(hex_colour, amount):
-    """Blend a hex colour towards white. amount 0 returns it unchanged, 1
-    returns white. Used to separate several plants of the same technology
-    while keeping them recognisably related."""
+    """Blend a hex colour towards white; amount 0 unchanged, 1 white."""
     h = hex_colour.lstrip("#")
     rgb = [int(h[i:i + 2], 16) for i in (0, 2, 4)]
     blended = [int(round(c + (255 - c) * amount)) for c in rgb]
@@ -126,9 +87,7 @@ def lighten(hex_colour, amount):
 
 
 class Run(object):
-    """One set of model results, either the live working folder or an
-    archived run. Everything the figures need travels on this object rather
-    than in module globals, so the dashboard can switch between runs."""
+    """One set of model results, either the live working folder or an archived run."""
 
     def __init__(self, run_id, label, results, summary, manifest=None):
         self.id = run_id
@@ -145,10 +104,8 @@ class Run(object):
 
         self.hour_min = int(results["Hour"].min())
         self.hour_max = int(results["Hour"].max())
-        # Results files written before ramping have none of these columns, and
-        # results files written before the price became the dual have a
-        # "Shadow Price" column instead of "Highest Running Cost". Archived
-        # runs are never rewritten, so every reader has to cope with both.
+        # Archived runs are never rewritten, so every reader has to cope with
+        # results files that predate ramping and the dual.
         self.has_stack = STACK_COL in results.columns
         self.has_ramp = RAMP_COST_COL in results.columns
         self.has_spill = SPILL_COL in results.columns
@@ -159,16 +116,11 @@ class Run(object):
         for i, row in self.summary.iterrows():
             tech = row["Technology"]
 
-            # A fleet can hold several plants of the same technology, for
-            # example a mid-merit gas plant and a gas peaker. They must not
-            # share a colour or they are indistinguishable in the stack, so
-            # repeats are shaded progressively lighter while staying
-            # recognisably that technology.
-            #
-            # Colour is keyed on technology and merit position within that
-            # technology, so it is stable for a given fleet. Comparing runs
-            # with different fleets can still shift a colour, which is why
-            # the comparison charts label rather than rely on colour.
+            # Several plants can share a technology, so repeats are shaded
+            # progressively lighter to stay distinguishable in the stack.
+            # Colour is keyed on technology and merit position within it, so
+            # comparing runs with different fleets can shift a colour, which
+            # is why the comparison charts label rather than rely on it.
             n_seen = seen_tech.get(tech, 0)
             seen_tech[tech] = n_seen + 1
             base = TECH_COLOURS.get(tech, FALLBACK_COLOURS[i % len(FALLBACK_COLOURS)])
@@ -226,8 +178,7 @@ _RUN_CACHE = {}
 
 
 def get_run(run_id):
-    """Load a run by id, caching it. Archived runs never change once written,
-    but the working folder does, so 'current' is always re-read."""
+    """Load a run by id, caching archived ones; 'current' is always re-read."""
     if run_id in (None, "", CURRENT_ID):
         return load_current()
     if run_id not in _RUN_CACHE:
@@ -250,9 +201,7 @@ def run_options():
 
 
 
-# --------------------------------------------------------------------------
 # Filtering and aggregation
-# --------------------------------------------------------------------------
 
 def slice_hours(run, lo, hi):
     """Rows within the selected hour window, always at hourly resolution."""
@@ -261,13 +210,7 @@ def slice_hours(run, lo, hi):
 
 
 def aggregate(run, df, resolution):
-    """Aggregate to daily or weekly buckets.
-
-    Generation, demand and costs are summed, because they are energy and
-    money and must add up. Price is averaged load-weighted, since that is
-    what is actually paid; a plain time-weighted mean would understate the
-    cost of expensive peak hours.
-    """
+    """Aggregate to daily or weekly buckets; energy summed, price load-weighted."""
     if resolution == "hourly" or df.empty:
         out = df.copy()
         out["x"] = out["Hour"]
@@ -337,9 +280,8 @@ def base_layout(fig, title, xlabel, ylabel, y2label=None, height=470):
 
     if y2label is not None:
         # Grid off on the right axis so it does not cross-hatch the stack.
-        # rangemode="tozero" keeps the line's height honestly comparable
-        # between windows. Note this re-specifies margin, so it must carry
-        # the same top value or the title would be covered again.
+        # This re-specifies margin, so it must carry the same top value or
+        # the title would be covered again.
         fig.update_layout(
             yaxis2=dict(title=y2label, overlaying="y", side="right",
                         showgrid=False, zeroline=False, rangemode="tozero"),
@@ -359,9 +301,7 @@ def empty_figure(message):
     return fig
 
 
-# --------------------------------------------------------------------------
 # Figures
-# --------------------------------------------------------------------------
 
 def fig_dispatch(run, agg, plants, overlays, resolution):
     if agg.empty:
@@ -417,12 +357,8 @@ def fig_dispatch(run, agg, plants, overlays, resolution):
     # price only to $41.60, so they cannot share an axis meaningfully.
     y2label = None
     if "price" in overlays:
-        # "hvh" rather than "hv": the step must be centred on the hour so it
-        # lines up with the bar for that hour. A bar at x spans x-0.5 to x+0.5
-        # (bargap=0), so the price riser has to sit on the bar edge at x+0.5,
-        # which is where "hvh" puts it. "hv" starts the run at x instead, so
-        # every price segment sat half a bar to the right of the hour it
-        # describes.
+        # "hvh" rather than "hv" so the step is centred on the hour: a bar at
+        # x spans x-0.5 to x+0.5, so the riser must sit on the bar edge.
         shape = "hvh" if resolution == "hourly" else "linear"
         price_name = ("Clearing price" if resolution == "hourly"
                       else "Load-weighted avg price")
@@ -515,6 +451,8 @@ def fig_costs(run, agg, resolution):
 
 
 def fig_price_duration(run, hourly):
+    # Always hourly, ignoring the resolution control: averaging over days or
+    # weeks flattens the peaks a duration curve exists to show.
     if hourly.empty:
         return empty_figure("No hours in the selected range")
 
@@ -534,6 +472,7 @@ def fig_price_duration(run, hourly):
 
 
 def fig_load_duration(run, hourly, plants):
+    # Always hourly, for the same reason as fig_price_duration.
     if hourly.empty:
         return empty_figure("No hours in the selected range")
 
@@ -601,25 +540,11 @@ def fig_energy_mix(run, hourly, plants):
     return fig
 
 
-# --------------------------------------------------------------------------
 # QA - consistency checks
-# --------------------------------------------------------------------------
 #
-# This section used to assert the LP optimality conditions of a single-hour
-# dispatch: in every hour, a part-loaded plant's marginal cost equals the
-# price, a plant at capacity is at or below it, and an idle plant is at or
-# above it. Those identities held exactly while every hour stood alone.
-#
-# Ramping ended that. Once moving a plant costs money and is rate limited,
-# a cheap plant may sit part loaded beneath a dearer one - because ramping up
-# and back down costs more than the fuel it saves, or because it must stay low
-# enough to reach a low demand later. Both are optimal. And the clearing price
-# is now the energy-balance dual, which absorbs ramp costs from neighbouring
-# hours and equals no plant's marginal cost at all.
-#
-# So the old checks are gone. They would fail constantly, on correct results,
-# for reasons no one could act on. What replaces them are identities that are
-# still true under ramping, because they are accounting rather than optimality:
+# These are accounting identities, not optimality conditions. The old
+# optimality checks were removed because ramping makes them fail on correct
+# results; see docs/model_semantics.md. What is left holds regardless:
 #
 #   energy balance   generation + unserved - spill == demand, exactly
 #   capacity         no plant generates above its hourly availability
@@ -627,11 +552,7 @@ def fig_energy_mix(run, hourly, plants):
 #   market cost      Market Cost == Clearing Price x Demand
 #
 # A failure in any of these is a bug in the model, not a feature of the data,
-# which is what makes them worth a pass/fail banner. The merit-order picture is
-# still shown, as a distribution rather than a verdict.
-#
-# One thing generating in an hour is not a plant: unserved energy, priced at
-# LoL, and spilled energy, priced negatively. Neither is in the merit order.
+# which is what makes them worth a pass/fail banner.
 
 QA_TOL = 1e-4          # $/MWh and MWh tolerance for declaring a violation
 MAX_VIOLATION_ROWS = 100
@@ -645,12 +566,7 @@ STATE_COLOURS = {STATE_PART: C_PRICE, STATE_FULL: C_SHADOW,
 
 
 def run_qa(run, hourly):
-    """Run the consistency checks over the selected hours.
-
-    Always uses hourly data: violations are per-hour events and averaging
-    would hide them. Returns a dict of counts, per-plant states and the
-    offending rows.
-    """
+    """Run the consistency checks over the selected hours, always hourly."""
     out = {
         "n_hours": len(hourly),
         "balance_errors": 0,
@@ -737,21 +653,19 @@ def run_qa(run, hourly):
                 "Detail": "generated above its hourly availability",
             })
 
-        # Moving faster than the ramp rate is always a bug, with one
-        # exception: a profiled plant may be dragged down faster than its rate
-        # by its own resource collapsing, which the model allows for free. The
-        # allowance is exactly the drop in availability, so it is recomputed
-        # here from the availability column rather than assumed.
+        # Moving faster than the ramp rate is a bug, except where a profiled
+        # plant is dragged down by its own resource collapsing, which the
+        # model allows for free. Recomputed from the availability column
+        # rather than assumed.
         rate = m["ramp_rate"]
         if rate is not None and len(hourly) > 1:
             delta = gen.diff()
             allowance = pd.Series(0.0, index=hourly.index)
             if m["avail_column"]:
                 allowance = (-cap.diff()).clip(lower=0.0).fillna(0.0)
-            # Hour 1 of the horizon has no predecessor and no ramp limit. Only
-            # skip it when the window really does start at the horizon's
-            # first hour; a mid-horizon window has a genuine predecessor,
-            # which diff() cannot see, so its first row is skipped too.
+            # The first row of the window is always skipped: diff() cannot see
+            # a predecessor outside the window, and hour 1 of the horizon has
+            # none at all.
             excess = delta.abs() - rate - allowance
             excess.iloc[0] = float("nan")
             for idx, row in hourly.loc[excess > QA_TOL].iterrows():
@@ -765,10 +679,8 @@ def run_qa(run, hourly):
                         abs(float(delta.loc[idx]))),
                 })
 
-        # Not a violation, but the thing a reader most wants pointed out:
-        # a cheap plant part loaded while something dearer runs. Before
-        # ramping this was a bug. Now it is usually a plant declining to pay
-        # to move. Counted, never failed on.
+        # A cheap plant part loaded under a dearer one. Usually a plant
+        # declining to pay to move, so counted, never failed on.
         if run.has_stack:
             out["held_back"] += int(
                 (part & (hourly[STACK_COL] > mc + QA_TOL)).sum())
@@ -843,13 +755,7 @@ def qa_banner(qa):
 
 
 def fig_qa_price(run, hourly):
-    """The clearing price against the merit-order stack.
-
-    Before ramping these two lines were identical and the point of the chart
-    was that their difference sat flat on zero. Now the gap is the story: it
-    is the ramp cost the system pays to move plants between hours, which no
-    single plant's offer explains.
-    """
+    """The clearing price against the merit-order stack; the gap is ramp cost."""
     if hourly.empty:
         return empty_figure("No hours in the selected range")
     if not run.has_stack:
@@ -882,15 +788,7 @@ def fig_qa_price(run, hourly):
 
 
 def fig_qa_states(run, qa):
-    """Hours each plant spends part loaded, at capacity and idle.
-
-    Before ramping, "part loaded" and "setting the price" were the same thing:
-    the marginal plant is by definition the one that is neither full nor idle.
-    That is no longer true. A plant can be part loaded because it is declining
-    to pay to ramp, or because it is holding low to stay able to reach a lower
-    demand later, and in neither case does it set the price. Read this as how
-    hard each plant is being worked, not as who is marginal.
-    """
+    """How hard each plant is worked: hours part loaded, at capacity and idle."""
     if not qa["states"]:
         return empty_figure("No hours in the selected range")
 
@@ -954,9 +852,7 @@ def qa_violations_table(qa):
     ])
 
 
-# --------------------------------------------------------------------------
 # KPI cards
-# --------------------------------------------------------------------------
 
 def kpi_card(label, value, sub=""):
     return html.Div([
@@ -980,9 +876,8 @@ def build_kpis(run, hourly):
     prod = hourly[PROD_COST_COL].sum()
     market = hourly[MARKET_COST_COL].sum()
 
-    # Production cost is fuel and VOM only. Since ramping it is no longer the
-    # whole objective, so the ramp and spill components are shown beside it
-    # rather than left to be silently missing from the reader's mental sum.
+    # Production cost is fuel and VOM only, so the ramp and spill components
+    # are shown beside it rather than left missing from the reader's sum.
     def total(col):
         return hourly[col].sum() if col in hourly.columns else 0.0
 
@@ -1016,9 +911,7 @@ def build_kpis(run, hourly):
     return cards
 
 
-# --------------------------------------------------------------------------
 # Layout
-# --------------------------------------------------------------------------
 
 app = Dash(__name__)
 app.title = "Dispatch Model Dashboard"
@@ -1038,12 +931,7 @@ def hour_marks(lo, hi):
 
 
 def plant_options(run, extra_run=None):
-    """Checklist entries for a run's fleet.
-
-    When comparing, the union of both fleets is offered so a plant present in
-    only one run can still be shown; it simply contributes nothing to the run
-    that lacks it.
-    """
+    """Checklist entries for a run's fleet, or the union of both when comparing."""
     entries = []
     seen = set()
     for source in (run, extra_run):
@@ -1266,9 +1154,7 @@ app.layout = html.Div([
           "backgroundColor": "#F4F5F7", "padding": "18px", "minHeight": "100vh"})
 
 
-# --------------------------------------------------------------------------
 # Comparison
-# --------------------------------------------------------------------------
 
 # Colours identifying which run a trace belongs to, deliberately separate
 # from the technology palette so A and B never get confused with fuels.
@@ -1286,8 +1172,7 @@ COMPARE_KPIS = [
 
 
 def window_kpis(run, lo, hi):
-    """KPIs recomputed over the visible window, so the comparison always
-    matches what the charts are showing rather than the whole archived run."""
+    """KPIs recomputed over the visible window rather than the whole run."""
     h = slice_hours(run, lo, hi)
     if h.empty:
         return {}
@@ -1352,8 +1237,7 @@ def delta_card(label, before, after, unit, better):
 
 
 def compare_attribution(a, b):
-    """State plainly whether code or inputs moved, which is the whole point
-    of keeping the archive."""
+    """State plainly whether code or inputs moved."""
     if a.manifest is None or b.manifest is None:
         return html.Div(
             "One of these is the live working folder, which has no manifest, "
@@ -1431,34 +1315,18 @@ def compare_inputs_table(a, b):
     return html.Div(blocks)
 
 
-# --------------------------------------------------------------------------
 # Comparison charts
-# --------------------------------------------------------------------------
 #
-# The comparison shows the difference between two runs rather than two sets of
-# absolutes overlaid. Two stacks cannot be read against each other, and even
-# two total lines only tell you *that* something moved. A stack of per-plant
-# deltas tells you *why*: coal down, solar up.
-#
-# Sign is carried by position, above or below zero, not by colour. Plants keep
-# the colours they have everywhere else in the dashboard, which also avoids
-# inventing a red/green pair that this file deliberately does not use.
+# Shows the difference between two runs, not two sets of absolutes overlaid:
+# a stack of per-plant deltas tells you *why* the total moved. Sign is carried
+# by position above or below zero, never by colour, so plants keep the colours
+# they have everywhere else.
 
 DELTA_TOL = 1e-6        # below this a delta counts as no change at all
 
 
 def align_runs(agg_a, agg_b):
-    """Restrict two aggregated runs to the periods they have in common.
-
-    Returns (aligned_a, aligned_b, dropped) with matching row order, so the
-    two can be subtracted safely.
-
-    Worth doing properly rather than comparing lengths. `aggregate` buckets on
-    the absolute hour, so equal-length frames are *usually* aligned, but two
-    runs whose hours have gaps can be the same length and still describe
-    different periods. Joining on x says so explicitly instead of relying on
-    that coincidence, and reports how much of each run had no counterpart.
-    """
+    """Restrict two aggregated runs to the periods they have in common."""
     common = pd.Index(sorted(set(agg_a["x"]) & set(agg_b["x"])), name="x")
     dropped = (len(agg_a) - len(common)) + (len(agg_b) - len(common))
     aligned_a = agg_a.set_index("x").reindex(common).reset_index()
@@ -1485,12 +1353,7 @@ def plant_delta(a, b, agg_a, agg_b, plant):
 
 
 def annotate_no_change(fig, message):
-    """Make 'nothing moved' look deliberate rather than broken.
-
-    A delta chart of two similar runs is a flat line on zero, which reads as a
-    failure to draw anything. Saying so, and holding the axis open around
-    zero, is the difference between an empty chart and an answer.
-    """
+    """Make 'nothing moved' look deliberate rather than broken."""
     fig.add_annotation(text=message, showarrow=False, xref="paper", yref="paper",
                        x=0.5, y=0.5, font=dict(size=13, color="#666666"))
     fig.update_yaxes(range=[-1, 1])
@@ -1629,8 +1492,7 @@ def fig_compare_price(a, b, lo, hi, resolution, mode):
 
 
 def compare_plants_table(a, b, lo, hi, plants):
-    """Per-plant generation in each run over the visible window, including
-    plants that exist in only one of the two fleets."""
+    """Per-plant generation in each run over the visible window."""
     ha, hb = slice_hours(a, lo, hi), slice_hours(b, lo, hi)
 
     # Merit order, cheapest first, matching every other listing in the app.
@@ -1705,9 +1567,7 @@ def build_comparison(a, b, lo, hi, resolution, plants, mode):
             compare_plants_table(a, b, lo, hi, plants))
 
 
-# --------------------------------------------------------------------------
 # Callbacks
-# --------------------------------------------------------------------------
 
 @app.callback(
     Output("run-select", "options"),
@@ -1718,15 +1578,13 @@ def build_comparison(a, b, lo, hi, resolution, plants, mode):
     State("run-compare", "value"),
 )
 def refresh_run_lists(_clicks, selected, current_compare):
-    """Keep both dropdowns in step with what is on disk. A run archived while
-    the dashboard is open shows up after a refresh."""
+    """Keep both dropdowns in step with what is on disk."""
     options = run_options()
     compare = [o for o in options if o["value"] != selected]
 
-    # Default the comparison to the previous run, so the tab has something in
-    # it on arrival rather than an empty prompt. Only when nothing is chosen:
-    # a manual pick, and a deliberate clearing, both survive a refresh,
-    # because a default that reasserts itself is worse than a stale one.
+    # Default to the previous run so the tab is not empty on arrival. Only
+    # when nothing is chosen: a manual pick and a deliberate clearing both
+    # survive a refresh.
     value = current_compare
     if value is None:
         value = previous_run_id(options, selected)
@@ -1738,15 +1596,7 @@ def refresh_run_lists(_clicks, selected, current_compare):
 
 
 def previous_run_id(options, selected):
-    """The archived run immediately older than the selected one.
-
-    `run_options` is the working folder first, then archived runs newest
-    first, so "the next entry along" is the previous run in both cases: the
-    newest archive when the working folder is selected, and the next one down
-    when an archived run is. The oldest run has no predecessor and gets None,
-    which leaves the comparison empty rather than wrapping around to a run
-    that is not its neighbour in any sense.
-    """
+    """The archived run immediately older than the selected one."""
     values = [o["value"] for o in options]
     if selected not in values:
         return None
@@ -1769,8 +1619,7 @@ def previous_run_id(options, selected):
     Input("run-compare", "value"),
 )
 def switch_run(run_id, compare_id):
-    """Runs differ in fleet and in hour range, so the controls are rebuilt
-    whenever the selection changes."""
+    """Rebuild the controls when the selected run changes."""
     run = get_run(run_id)
     other = get_run(compare_id) if compare_id else None
 
@@ -1941,8 +1790,7 @@ def update_energy_mix(rng, plants):
     Input("store-range", "data"),
 )
 def update_qa(rng):
-    """QA respects the hour range so a suspicious window can be isolated,
-    but deliberately ignores the resolution dropdown."""
+    """QA respects the hour range but ignores the resolution dropdown."""
     run = get_run(rng.get("run"))
     hourly = slice_hours(run, rng["lo"], rng["hi"])
     qa = run_qa(run, hourly)
@@ -1977,9 +1825,7 @@ def update_compare(rng, resolution, plants, mode):
 
 
 
-# --------------------------------------------------------------------------
 # Main
-# --------------------------------------------------------------------------
 
 if __name__ == "__main__":
     run = load_current()

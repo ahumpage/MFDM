@@ -29,7 +29,7 @@ third defective copy the Origin did not mention.
 **The subtler finding is the bottom row.** `load_weighted_price` is `market / demand` in
 *all four* places, including the one the Origin calls correct. So it is currently
 **consistent**, and consistent with a defensible definition: `Market Cost ($)` is
-constructed in `build_results` as `price x demand`, so `market / demand` is
+constructed in `build_hourly_results` as `price x demand`, so `market / demand` is
 arithmetically self-consistent. Changing the denominator to served energy without also
 redefining the numerator would produce a number that is neither.
 
