@@ -16,11 +16,25 @@ Runs that are not the most up to date are archived by run_archive/runstore.py in
 timestamped folder under run_archive/, each with a manifest.json recording the git commit
 and input hashes. The archive is kept in the repo so past runs stay usable on this machine.
 
+## Key documents
+
+    CONTEXT.md                  the vocabulary. Read this before using a term that
+                                sounds domain-specific; several are collisions
+                                (spill vs curtailment, price vs highest running cost)
+    README.md                   the model stated as maths: sets, parameters,
+                                objective, constraints
+    docs/ramping_semantics.md   what ramping means, why the clearing price is now
+                                the energy-balance dual, and two worked 3-hour
+                                examples that can be run
+    docs/examples/ramping/      input folders for those worked examples. Run with
+                                model/MFDM.py --inputs <folder> --results <folder>
+
 ## Agent skills
 
 ### Issue tracker
 
-Issues live in GitHub Issues for `ahumpage/MFDM`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Local markdown under `docs/planning/`. There is no live issue tracker and `gh` is not
+installed. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

@@ -16,7 +16,12 @@ Controls
     preset buttons      first day, first week, full period
     resolution          hourly, daily mean or weekly mean
     plant toggles       show or hide each plant
-    overlay toggles     demand line, marginal cost lines, shadow price
+    overlay toggles     demand line, marginal cost lines, highest running cost
+
+Note on prices: the clearing price is the dual of the energy balance, which
+under ramping is no longer equal to any plant's marginal cost. The old
+merit-order figure is still available as "Highest running cost", a diagnostic
+rather than a price. See docs/ramping_semantics.md.
 
 Note on the duration curves: they always use hourly data, because averaging
 over days or weeks flattens the peaks that a duration curve exists to show.
@@ -81,10 +86,18 @@ RGBA_PRICE_AREA = "rgba(213, 94, 0, 0.20)"
 
 DEMAND_COL = "Demand (MWh)"
 PRICE_COL = "Clearing Price ($/MWh)"
-SHADOW_COL = "Shadow Price ($/MWh)"
+# The old merit-order price, kept as a diagnostic. It is the marginal cost of
+# the most expensive plant running, which is no longer the clearing price:
+# ramping made the objective intertemporal, so the price is the energy-balance
+# dual. See docs/ramping_semantics.md.
+STACK_COL = "Highest Running Cost ($/MWh)"
 PROD_COST_COL = "Production Cost ($)"
 MARKET_COST_COL = "Market Cost ($)"
 UNSERVED_COL = "Unserved Energy (MWh)"
+SPILL_COL = "Spill (MWh)"
+RAMP_UP_COL = "Ramp Up (MWh)"
+RAMP_DOWN_COL = "Ramp Down (MWh)"
+RAMP_COST_COL = "Ramp Cost ($)"
 
 HOURS_PER_DAY = 24
 HOURS_PER_WEEK = 168
@@ -132,7 +145,13 @@ class Run(object):
 
         self.hour_min = int(results["Hour"].min())
         self.hour_max = int(results["Hour"].max())
-        self.has_shadow = SHADOW_COL in results.columns
+        # Results files written before ramping have none of these columns, and
+        # results files written before the price became the dual have a
+        # "Shadow Price" column instead of "Highest Running Cost". Archived
+        # runs are never rewritten, so every reader has to cope with both.
+        self.has_stack = STACK_COL in results.columns
+        self.has_ramp = RAMP_COST_COL in results.columns
+        self.has_spill = SPILL_COL in results.columns
 
     def _build_meta(self):
         meta = {}
@@ -161,6 +180,13 @@ class Run(object):
                 "fuel": row["Fuel"],
                 "capacity": float(row["Capacity (MW)"]),
                 "marginal_cost": float(row["Marginal Cost ($/MWh)"]),
+                # Ramping. Absent from summaries written before ramping, in
+                # which case None means "this run had no ramp limits at all".
+                "ramp_rate": (float(row["Ramp Rate (MW/hr)"])
+                              if "Ramp Rate (MW/hr)" in self.summary.columns else None),
+                "ramp_premium": (float(row["Ramp Premium ($/MWh)"])
+                                 if "Ramp Premium ($/MWh)" in self.summary.columns
+                                 else None),
                 "profiled": (bool(row["Profiled"])
                              if "Profiled" in self.summary.columns else False),
                 "colour": colour,
@@ -254,7 +280,9 @@ def aggregate(run, df, resolution):
     df["bucket"] = (df["Hour"] - 1) // step
 
     sum_cols = [run.meta[p]["column"] for p in run.plant_order]
-    sum_cols += [DEMAND_COL, PROD_COST_COL, MARKET_COST_COL]
+    sum_cols += [DEMAND_COL, PROD_COST_COL, MARKET_COST_COL,
+                 RAMP_UP_COL, RAMP_DOWN_COL, RAMP_COST_COL,
+                 UNSERVED_COL, SPILL_COL]
     sum_cols = [c for c in sum_cols if c in df.columns]
 
     grouped = df.groupby("bucket")
@@ -267,9 +295,9 @@ def aggregate(run, df, resolution):
         lambda g: (g[PRICE_COL] * g[DEMAND_COL]).sum() / g[DEMAND_COL].sum()
         if g[DEMAND_COL].sum() > 0 else 0.0
     )
-    if run.has_shadow:
-        out[SHADOW_COL] = grouped.apply(
-            lambda g: (g[SHADOW_COL] * g[DEMAND_COL]).sum() / g[DEMAND_COL].sum()
+    if run.has_stack:
+        out[STACK_COL] = grouped.apply(
+            lambda g: (g[STACK_COL] * g[DEMAND_COL]).sum() / g[DEMAND_COL].sum()
             if g[DEMAND_COL].sum() > 0 else 0.0
         )
 
@@ -429,12 +457,12 @@ def fig_price(run, agg, overlays, resolution):
         hovertemplate="$%{y:,.2f}/MWh<extra>Clearing price</extra>",
     ))
 
-    if "shadow" in overlays and run.has_shadow:
+    if "stack" in overlays and run.has_stack:
         fig.add_trace(go.Scatter(
-            x=agg["x"], y=agg[SHADOW_COL],
-            name="Shadow price (dual)", mode="lines",
+            x=agg["x"], y=agg[STACK_COL],
+            name="Highest running cost (merit order)", mode="lines",
             line=dict(color=C_SHADOW, width=1.2, dash="dot", shape=shape),
-            hovertemplate="$%{y:,.2f}/MWh<extra>Shadow price</extra>",
+            hovertemplate="$%{y:,.2f}/MWh<extra>Highest running cost</extra>",
         ))
 
     if "mclines" in overlays:
@@ -465,13 +493,23 @@ def fig_costs(run, agg, resolution):
     ))
     fig.add_trace(go.Scatter(
         x=agg["x"], y=agg[PROD_COST_COL],
-        name="Production cost (LP objective)", mode="lines",
+        name="Production cost (fuel and VOM)", mode="lines",
         # Dashed as well as differently coloured, so the two lines stay
         # distinguishable without relying on colour at all.
         line=dict(color=C_PROD, width=1.6, dash="dash"),
         fill="tonexty", fillcolor=RGBA_PRICE_FILL,
         hovertemplate="$%{y:,.0f}<extra>Production cost</extra>",
     ))
+    # Ramp cost is a third component of the objective, sitting on top of
+    # production cost. Shown separately rather than folded in, so producer
+    # surplus stays readable as the gap between market and production cost.
+    if run.has_ramp:
+        fig.add_trace(go.Scatter(
+            x=agg["x"], y=agg[RAMP_COST_COL],
+            name="Ramp cost (premium on energy moved)", mode="lines",
+            line=dict(color=C_SHADOW, width=1.2, dash="dot"),
+            hovertemplate="$%{y:,.0f}<extra>Ramp cost</extra>",
+        ))
     return base_layout(fig, "Cost per period - shaded area is producer surplus",
                        axis_label(resolution), "Cost ($)")
 
@@ -564,26 +602,36 @@ def fig_energy_mix(run, hourly, plants):
 
 
 # --------------------------------------------------------------------------
-# QA - LP optimality checks
+# QA - consistency checks
 # --------------------------------------------------------------------------
 #
-# For a least-cost LP with only an energy balance and capacity limits, the
-# optimal solution must satisfy these conditions in every hour, where P is the
-# clearing price and MC is a plant's marginal cost:
+# This section used to assert the LP optimality conditions of a single-hour
+# dispatch: in every hour, a part-loaded plant's marginal cost equals the
+# price, a plant at capacity is at or below it, and an idle plant is at or
+# above it. Those identities held exactly while every hour stood alone.
 #
-#   part loaded (0 < gen < capacity)   MC == P    the plant is marginal
-#   at capacity (gen >= capacity)      MC <= P    inframarginal, earns rent
-#   idle        (gen <= 0)             MC >= P    too expensive to run
+# Ramping ended that. Once moving a plant costs money and is rate limited,
+# a cheap plant may sit part loaded beneath a dearer one - because ramping up
+# and back down costs more than the fuel it saves, or because it must stay low
+# enough to reach a low demand later. Both are optimal. And the clearing price
+# is now the energy-balance dual, which absorbs ramp costs from neighbouring
+# hours and equals no plant's marginal cost at all.
 #
-# A violation means the dispatch is not least cost, which points at a bug in
-# the model rather than at the data. These identities hold exactly for the
-# current model; they start to bind once minimum generation levels, ramp
-# rates, unit commitment or storage are added.
+# So the old checks are gone. They would fail constantly, on correct results,
+# for reasons no one could act on. What replaces them are identities that are
+# still true under ramping, because they are accounting rather than optimality:
+#
+#   energy balance   generation + unserved - spill == demand, exactly
+#   capacity         no plant generates above its hourly availability
+#   ramp rate        no plant moves more than its rate between adjacent hours
+#   market cost      Market Cost == Clearing Price x Demand
+#
+# A failure in any of these is a bug in the model, not a feature of the data,
+# which is what makes them worth a pass/fail banner. The merit-order picture is
+# still shown, as a distribution rather than a verdict.
 #
 # One thing generating in an hour is not a plant: unserved energy, priced at
-# VoLL. In an hour with a shortfall it is the marginal unit and sets the
-# price, so every plant should be at capacity and the price will match no
-# plant's marginal cost. That is correct, not unexplained.
+# VoLL, and spilled energy, priced negatively. Neither is in the merit order.
 
 QA_TOL = 1e-4          # $/MWh and MWh tolerance for declaring a violation
 MAX_VIOLATION_ROWS = 100
@@ -597,7 +645,7 @@ STATE_COLOURS = {STATE_PART: C_PRICE, STATE_FULL: C_SHADOW,
 
 
 def run_qa(run, hourly):
-    """Run the LP optimality checks over the selected hours.
+    """Run the consistency checks over the selected hours.
 
     Always uses hourly data: violations are per-hour events and averaging
     would hide them. Returns a dict of counts, per-plant states and the
@@ -605,40 +653,45 @@ def run_qa(run, hourly):
     """
     out = {
         "n_hours": len(hourly),
-        "price_mismatch": 0,
-        "max_price_diff": 0.0,
-        "unexplained_price": 0,
+        "balance_errors": 0,
+        "max_balance_error": 0.0,
+        "market_cost_errors": 0,
         "violations": [],
         "n_violations": 0,
         "states": {},
         "rents": {},
         "total_rent": 0.0,
+        "held_back": 0,
         "ok": True,
     }
     if hourly.empty:
         return out
 
     price = hourly[PRICE_COL]
+    gen_cols = [run.meta[p]["column"] for p in run.plant_order]
+    total_gen = hourly[gen_cols].sum(axis=1)
 
-    # --- check 1: clearing price vs shadow price (the LP dual) ---
-    if run.has_shadow:
-        diff = (price - hourly[SHADOW_COL]).abs()
-        out["max_price_diff"] = float(diff.max())
-        out["price_mismatch"] = int((diff > QA_TOL).sum())
-
-    # --- check 3: does every price correspond to some plant? ---
-    # Except in an hour with unserved energy, where the marginal MWh is not
-    # supplied by any plant but shed, and lost load sets the price at VoLL.
-    # Those hours are detected from the data rather than by comparing against
-    # a hardcoded VoLL, so the figure cannot drift from the model's constant.
-    mcs = [round(run.meta[p]["marginal_cost"], 6) for p in run.plant_order]
+    # --- check 1: the energy balance closes ---
+    balance = total_gen.copy()
     if UNSERVED_COL in hourly.columns:
-        scarce = hourly[UNSERVED_COL] > QA_TOL
-    else:
-        scarce = pd.Series(False, index=hourly.index)
-    out["unexplained_price"] = int((~price.round(6).isin(mcs) & ~scarce).sum())
+        balance = balance + hourly[UNSERVED_COL]
+    if SPILL_COL in hourly.columns:
+        balance = balance - hourly[SPILL_COL]
+    balance_error = (balance - hourly[DEMAND_COL]).abs()
+    out["max_balance_error"] = float(balance_error.max())
+    # Scaled to demand: these are sums of many rounded numbers, so a fixed
+    # tolerance would fire on arithmetic noise in a large hour.
+    out["balance_errors"] = int(
+        (balance_error > QA_TOL * hourly[DEMAND_COL].clip(lower=1.0)).sum())
 
-    # --- check 2: per plant-hour optimality conditions ---
+    # --- check 2: market cost is price times demand ---
+    if MARKET_COST_COL in hourly.columns:
+        expected = price * hourly[DEMAND_COL]
+        drift = (hourly[MARKET_COST_COL] - expected).abs()
+        out["market_cost_errors"] = int(
+            (drift > QA_TOL * expected.abs().clip(lower=1.0)).sum())
+
+    # --- check 3: per plant-hour capacity and ramp limits ---
     for p in run.plant_order:
         m = run.meta[p]
         gen = hourly[m["column"]]
@@ -647,8 +700,7 @@ def run_qa(run, hourly):
         # The binding limit is the hourly availability, not nameplate. A wind
         # farm running at its resource limit is at capacity and earns rent,
         # even though it may be at 20% of nameplate. Judging it against
-        # nameplate would wrongly call it part loaded and demand that it set
-        # the price.
+        # nameplate would wrongly call it part loaded.
         if m["avail_column"]:
             cap = hourly[m["avail_column"]]
         else:
@@ -673,36 +725,60 @@ def run_qa(run, hourly):
         # Inframarginal rent: what the plant earns above its own running cost.
         out["rents"][p] = float(((price - mc) * gen).sum())
 
-        bad_part = part & ((mc - price).abs() > QA_TOL)
-        bad_full = full & (mc > price + QA_TOL)
-        bad_idle = idle & (mc < price - QA_TOL)
+        # Over capacity is always a bug.
+        over_cap = gen > cap + QA_TOL
+        for idx, row in hourly.loc[over_cap].iterrows():
+            out["violations"].append({
+                "Hour": int(row["Hour"]),
+                "Plant": p,
+                "Check": "Capacity",
+                "Generation (MWh)": round(float(row[m["column"]]), 3),
+                "Limit": round(float(cap.loc[idx]), 3),
+                "Detail": "generated above its hourly availability",
+            })
 
-        for mask, state, rule in (
-            (bad_part, STATE_PART, "part loaded so MC should equal price"),
-            (bad_full, STATE_FULL, "at capacity so MC should be <= price"),
-            (bad_idle, STATE_IDLE, "idle so MC should be >= price"),
-        ):
-            if not mask.any():
-                continue
-            for idx, row in hourly.loc[mask].iterrows():
+        # Moving faster than the ramp rate is always a bug, with one
+        # exception: a profiled plant may be dragged down faster than its rate
+        # by its own resource collapsing, which the model allows for free. The
+        # allowance is exactly the drop in availability, so it is recomputed
+        # here from the availability column rather than assumed.
+        rate = m["ramp_rate"]
+        if rate is not None and len(hourly) > 1:
+            delta = gen.diff()
+            allowance = pd.Series(0.0, index=hourly.index)
+            if m["avail_column"]:
+                allowance = (-cap.diff()).clip(lower=0.0).fillna(0.0)
+            # Hour 1 of the horizon has no predecessor and no ramp limit. Only
+            # skip it when the window really does start at the horizon's
+            # first hour; a mid-horizon window has a genuine predecessor,
+            # which diff() cannot see, so its first row is skipped too.
+            excess = delta.abs() - rate - allowance
+            excess.iloc[0] = float("nan")
+            for idx, row in hourly.loc[excess > QA_TOL].iterrows():
                 out["violations"].append({
                     "Hour": int(row["Hour"]),
                     "Plant": p,
-                    "State": state,
+                    "Check": "Ramp rate",
                     "Generation (MWh)": round(float(row[m["column"]]), 3),
-                    "Available (MW)": round(float(cap.loc[idx]), 3),
-                    "Nameplate (MW)": m["capacity"],
-                    "Marginal Cost ($/MWh)": mc,
-                    "Clearing Price ($/MWh)": round(float(row[PRICE_COL]), 4),
-                    "Failed rule": rule,
+                    "Limit": round(float(rate + allowance.loc[idx]), 3),
+                    "Detail": "moved {:,.2f} MWh from the previous hour".format(
+                        abs(float(delta.loc[idx]))),
                 })
+
+        # Not a violation, but the thing a reader most wants pointed out:
+        # a cheap plant part loaded while something dearer runs. Before
+        # ramping this was a bug. Now it is usually a plant declining to pay
+        # to move. Counted, never failed on.
+        if run.has_stack:
+            out["held_back"] += int(
+                (part & (hourly[STACK_COL] > mc + QA_TOL)).sum())
 
     out["total_rent"] = float(sum(out["rents"].values()))
     out["n_violations"] = len(out["violations"])
     out["violations"].sort(key=lambda r: (r["Hour"], r["Plant"]))
     out["ok"] = (out["n_violations"] == 0
-                 and out["price_mismatch"] == 0
-                 and out["unexplained_price"] == 0)
+                 and out["balance_errors"] == 0
+                 and out["market_cost_errors"] == 0)
     return out
 
 
@@ -715,13 +791,13 @@ def qa_banner(qa):
                                "fontSize": "13px", "color": "#666"})
 
     checks = [
-        ("Clearing price equals shadow price (LP dual)",
-         qa["price_mismatch"], "{} of {} hours differ (max ${:.2e}/MWh)".format(
-             qa["price_mismatch"], qa["n_hours"], qa["max_price_diff"])),
-        ("Every plant-hour satisfies LP optimality",
+        ("Energy balance closes in every hour",
+         qa["balance_errors"], "{} of {} hours off (max {:.2e} MWh)".format(
+             qa["balance_errors"], qa["n_hours"], qa["max_balance_error"])),
+        ("No plant exceeds its availability or its ramp rate",
          qa["n_violations"], "{} violating plant-hours".format(qa["n_violations"])),
-        ("Every price equals some plant's marginal cost",
-         qa["unexplained_price"], "{} unexplained hours".format(qa["unexplained_price"])),
+        ("Market cost equals clearing price x demand",
+         qa["market_cost_errors"], "{} hours disagree".format(qa["market_cost_errors"])),
     ]
 
     rows = []
@@ -740,18 +816,25 @@ def qa_banner(qa):
     header = ("All QA checks passed over {:,} hours".format(qa["n_hours"]) if ok
               else "QA found problems over {:,} hours".format(qa["n_hours"]))
 
+    note = (
+        "These are accounting identities, not optimality conditions, so an "
+        "all-pass result is expected and a failure means a bug in the model. "
+        "The old merit-order checks were retired when ramping made them false "
+        "on correct results: a cheap plant may now sit part loaded beneath a "
+        "dearer one rather than pay to move."
+    )
+    if qa["held_back"]:
+        note += (" In this window {:,} plant-hours look like that; see the "
+                 "merit order chart below.".format(qa["held_back"]))
+
     return html.Div([
         html.Div(header, style={"fontWeight": "700", "fontSize": "14px",
                                 "marginBottom": "8px",
                                 "color": C_PASS if ok else C_FAIL}),
         html.Div(rows),
-        html.Div(
-            "Note: with only balance and capacity constraints these identities hold "
-            "exactly, so an all-pass result is expected. The checks start to earn "
-            "their keep once minimum generation, ramp rates, unit commitment or "
-            "storage are added.",
-            style={"fontSize": "11px", "color": "#888", "fontStyle": "italic",
-                   "marginTop": "8px"}),
+        html.Div(note,
+                 style={"fontSize": "11px", "color": "#888", "fontStyle": "italic",
+                        "marginTop": "8px"}),
     ], style={
         "padding": "12px 14px", "borderRadius": "5px",
         "backgroundColor": C_PASS_BG if ok else C_FAIL_BG,
@@ -760,42 +843,53 @@ def qa_banner(qa):
 
 
 def fig_qa_price(run, hourly):
-    """Clearing price against the LP dual, with their difference on the right
-    axis. On a correct model the difference line sits flat on zero."""
+    """The clearing price against the merit-order stack.
+
+    Before ramping these two lines were identical and the point of the chart
+    was that their difference sat flat on zero. Now the gap is the story: it
+    is the ramp cost the system pays to move plants between hours, which no
+    single plant's offer explains.
+    """
     if hourly.empty:
         return empty_figure("No hours in the selected range")
-    if not run.has_shadow:
-        return empty_figure("No shadow price column in dispatch_results.csv")
+    if not run.has_stack:
+        return empty_figure(
+            "No 'Highest Running Cost' column in dispatch_results.csv. "
+            "This run predates the merit-order diagnostic.")
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=hourly["Hour"], y=hourly[PRICE_COL],
-        name="Clearing price (merit order)", mode="lines",
+        name="Clearing price (energy-balance dual)", mode="lines",
         line=dict(color=C_PRICE, width=2.4, shape="hv"),
-        hovertemplate="$%{y:,.2f}/MWh<extra>Clearing</extra>",
+        hovertemplate="$%{y:,.2f}/MWh<extra>Clearing price</extra>",
     ))
     fig.add_trace(go.Scatter(
-        x=hourly["Hour"], y=hourly[SHADOW_COL],
-        name="Shadow price (LP dual)", mode="lines",
+        x=hourly["Hour"], y=hourly[STACK_COL],
+        name="Highest running cost (merit order)", mode="lines",
         line=dict(color=C_SHADOW, width=1.2, dash="dot", shape="hv"),
-        hovertemplate="$%{y:,.2f}/MWh<extra>Shadow</extra>",
+        hovertemplate="$%{y:,.2f}/MWh<extra>Highest running cost</extra>",
     ))
     fig.add_trace(go.Scatter(
-        x=hourly["Hour"], y=(hourly[PRICE_COL] - hourly[SHADOW_COL]),
-        name="Difference", mode="lines", yaxis="y2",
+        x=hourly["Hour"], y=(hourly[PRICE_COL] - hourly[STACK_COL]),
+        name="Gap (what ramping adds)", mode="lines", yaxis="y2",
         line=dict(color=C_NEUTRAL, width=1.2),
-        hovertemplate="$%{y:.2e}/MWh<extra>Difference</extra>",
+        hovertemplate="$%{y:,.2f}/MWh<extra>Gap</extra>",
     ))
 
-    return base_layout(fig, "QA: clearing price vs shadow price",
-                       "Hour", "Price ($/MWh)", y2label="Difference ($/MWh)")
+    return base_layout(fig, "QA: clearing price vs the merit order stack",
+                       "Hour", "Price ($/MWh)", y2label="Gap ($/MWh)")
 
 
 def fig_qa_states(run, qa):
     """Hours each plant spends part loaded, at capacity and idle.
 
-    The part-loaded count should equal the plant's price-setting hours,
-    because the marginal plant is by definition the part-loaded one.
+    Before ramping, "part loaded" and "setting the price" were the same thing:
+    the marginal plant is by definition the one that is neither full nor idle.
+    That is no longer true. A plant can be part loaded because it is declining
+    to pay to ramp, or because it is holding low to stay able to reach a lower
+    demand later, and in neither case does it set the price. Read this as how
+    hard each plant is being worked, not as who is marginal.
     """
     if not qa["states"]:
         return empty_figure("No hours in the selected range")
@@ -823,8 +917,7 @@ def fig_qa_states(run, qa):
         )
 
     fig.update_layout(barmode="stack")
-    fig = base_layout(fig, "QA: plant state by hour (part loaded = price setting)",
-                      "", "Hours")
+    fig = base_layout(fig, "QA: plant state by hour", "", "Hours")
     # Headroom so the per-plant annotations sitting on top of each bar do not
     # clip against the legend.
     tallest = max((sum(qa["states"][p].values()) for p in plants), default=0)
@@ -845,7 +938,7 @@ def qa_violations_table(qa):
                                                      qa["n_violations"])
 
     return html.Div([
-        html.Div("Optimality violations" + note,
+        html.Div("Capacity and ramp violations" + note,
                  style={"fontWeight": "600", "fontSize": "13px",
                         "margin": "14px 0 6px 0", "color": C_FAIL}),
         dash_table.DataTable(
@@ -887,17 +980,40 @@ def build_kpis(run, hourly):
     prod = hourly[PROD_COST_COL].sum()
     market = hourly[MARKET_COST_COL].sum()
 
-    return [
+    # Production cost is fuel and VOM only. Since ramping it is no longer the
+    # whole objective, so the ramp and spill components are shown beside it
+    # rather than left to be silently missing from the reader's mental sum.
+    def total(col):
+        return hourly[col].sum() if col in hourly.columns else 0.0
+
+    ramp = total(RAMP_COST_COL)
+    unserved_cost = total("Unserved Cost ($)")
+    spill_cost = total("Spill Cost ($)")
+
+    cards = [
         kpi_card("Hours", "{:,}".format(len(hourly)),
                  "hour {:,} to {:,}".format(int(hourly["Hour"].min()),
                                             int(hourly["Hour"].max()))),
         kpi_card("Energy served", "{:,.0f} MWh".format(demand)),
-        kpi_card("Production cost", "${:,.0f}".format(prod), "the LP objective"),
+        kpi_card("Production cost", "${:,.0f}".format(prod), "fuel and VOM"),
+    ]
+    if run.has_ramp:
+        cards.append(kpi_card("Ramp cost", "${:,.0f}".format(ramp),
+                              "premium on energy moved"))
+        cards.append(kpi_card(
+            "Total system cost",
+            "${:,.0f}".format(prod + ramp + unserved_cost + spill_cost),
+            "the LP objective"))
+    cards += [
         kpi_card("Market cost", "${:,.0f}".format(market), "price x demand"),
         kpi_card("Avg production cost", "${:,.2f}/MWh".format(prod / demand if demand else 0)),
         kpi_card("Load-weighted price", "${:,.2f}/MWh".format(market / demand if demand else 0)),
         kpi_card("Producer surplus", "${:,.0f}".format(market - prod), "market - production"),
     ]
+    if run.has_spill and total(SPILL_COL) > QA_TOL:
+        cards.append(kpi_card("Spilled", "{:,.0f} MWh".format(total(SPILL_COL)),
+                              "generated and thrown away"))
+    return cards
 
 
 # --------------------------------------------------------------------------
@@ -1051,7 +1167,7 @@ app.layout = html.Div([
                         {"label": " Demand line", "value": "demand"},
                         {"label": " Clearing price", "value": "price"},
                         {"label": " Marginal cost lines", "value": "mclines"},
-                        {"label": " Shadow price", "value": "shadow"},
+                        {"label": " Highest running cost", "value": "stack"},
                     ],
                     value=["demand", "mclines"],
                     labelStyle={"display": "inline-block", "marginRight": "16px",
