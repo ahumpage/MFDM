@@ -42,7 +42,7 @@ happens *next*.
 
 ## 2. Ramp rate: what limits movement
 
-Each plant carries a `Ramp_rate (MW/hr)` in `inputs/plants.csv`: the most it may
+Each plant carries a `Ramp_rate (MW/hr)` in the plants file: the most it may
 move, in either direction, between two adjacent hours.
 
 | Plant | Technology | Capacity | Ramp rate | Reaches full output in |
@@ -83,7 +83,7 @@ constrain the wrong pairs of hours and still solve.
 ## 3. Ramp cost: how movement becomes money
 
 A plant burns fuel less efficiently while it is changing output than while it is
-holding steady. `inputs/plants.csv` therefore carries a second, worse efficiency
+holding steady. The plants file therefore carries a second, worse efficiency
 for the ramping case, and the **ramp premium** is the difference between the two
 fuel costs:
 
@@ -232,9 +232,11 @@ removed when ramping was simplified, and ramp up and ramp down are now
 symmetric.
 
 What avoids the trap instead is the input convention: **profiled plants are
-left unconstrained.** A blank `Ramp_rate` in `plants.csv` means no limit, and
-every plant in `inputs/plants.csv` is currently blank. Giving a wind or solar
-plant a finite ramp rate re-arms the trap, and nothing in the model will say so.
+left unconstrained.** A blank `Ramp_rate` means no limit. Every plant in
+`plants_basic.csv` is blank, and the one plant given a ramp rate in
+`plants_ramping.csv` is a coal plant, so no profiled plant is ramp limited in
+either. Giving a wind or solar plant a finite ramp rate re-arms the trap, and
+nothing in the model will say so.
 
 ---
 
@@ -354,10 +356,36 @@ meaning, so each one is listed with what it claims.
 
 ### Inputs
 
-All four live in `inputs/` by default, or in the folder given to `--inputs`. All
-four must be present; a missing one is a `FileNotFoundError` naming the path.
+The model reads four inputs, one per **role**: plants, fuel, demand and
+profiles. A role is a fixed idea; the file filling it is not. Each role has a
+flag naming its file — `--plants`, `--fuel`, `--demand`, `--profiles` — so
+`inputs/` can hold several files for a role and a run says which it wants. A
+bare name is looked for in `inputs/`, or in the folder given to `--inputs`; a
+value containing a directory is used as a path in its own right.
 
-#### `inputs/plants.csv` — one row per plant
+| Role | Default file | Alternatives supplied |
+|---|---|---|
+| plants | `plants_basic.csv` | `plants_ramping.csv` |
+| fuel | `fuel.csv` | — |
+| demand | `demand.csv` | — |
+| profiles | `profiles_basic.csv` | `profiles_renewables.csv` |
+
+The defaults are the simple case: `plants_basic.csv` leaves `Ramp_rate` blank so
+nothing is ramp limited, and `profiles_basic.csv` holds every factor at 1.0 so
+nothing is resource limited. The alternatives switch those on independently.
+
+Every role must be filled; a missing file is a `FileNotFoundError` naming the
+path. What follows is the contract for each role — **columns, not file names**.
+Any file with the right columns can fill a role. The `--inputs` folder is the
+one exception: it is read by the plain names `plants.csv`, `fuel.csv`,
+`demand.csv` and `profiles.csv`, which is what the worked examples use.
+
+The run archive is keyed by role too, so a run using `plants_ramping.csv` is
+filed under `plants.csv` and records `plants_ramping.csv` as its `source`. That
+is what makes a basic run and a ramping run directly diffable, and it is what
+`runs.py restore` uses to put each file back where it came from.
+
+#### plants — one row per plant
 
 | Column | Meaning |
 |---|---|
@@ -370,14 +398,14 @@ four must be present; a missing one is a `FileNotFoundError` naming the path.
 | `Ramp_rate (MW/hr)` | The most the plant may move between adjacent hours, in either direction. |
 | `Ramp_efficiency(MWh/MWhTh)` | Efficiency while moving. Validated never to exceed `Efficiency`; see [§3](#ramping-is-never-cheaper-than-steady-running). Located by column-name prefix, so the exact spacing does not matter. |
 
-#### `inputs/fuel.csv` — one row per fuel
+#### fuel — one row per fuel
 
 | Column | Meaning |
 |---|---|
 | `Technology` | Misleadingly named: it holds **fuel** names, matched against `plants.csv`'s `Fuel` column. |
 | `Fuel Price ($/MWhTh)` | Price per **thermal** MWh. Divided by efficiency to reach an electrical cost. |
 
-#### `inputs/demand.csv` — one row per hour
+#### demand — one row per hour
 
 | Column | Meaning |
 |---|---|
@@ -387,22 +415,27 @@ four must be present; a missing one is a `FileNotFoundError` naming the path.
 The horizon is however many rows this file has, currently 744. It does not wrap:
 the last hour is not followed by the first.
 
-#### `inputs/profiles.csv` — hourly availability factors
+#### profiles — hourly availability factors
 
-This is the one input whose shape cannot be guessed, because it has **two header
-rows**:
+This is the one input whose shape cannot be guessed, because it may have **one
+header row or two**:
 
 ```
-,FRA,FRA
+,FRA,FRA          <- optional region row
 hours,Wind,Solar
 1,0.6,0
 2,0.5,0
 ```
 
-Row 1 is a region, row 2 is the series. `load_data` reads both with
-`header=[0, 1]` and flattens them into names of the form `FRA Wind`. Column
+`load_data` decides which it is by looking at the first cell of the first line.
+A region row is blank there, because the column it heads is the hour column,
+whose name lives on the row below — so a file starting `,FRA,FRA` has a region
+row and one starting `hours,Wind,Solar` does not. With a region row the two
+rows are read with `header=[0, 1]` and flattened into names of the form
+`FRA Wind`; without one the series names are used as they stand. Column
 matching then looks for the technology token (`wind`, `solar`) anywhere in the
-flattened name, so the region does not affect which column a plant is matched to.
+name, so the region never affects which column a plant is matched to, and both
+shapes behave identically from there on.
 
 Values are **availability factors**: a share of nameplate between 0 and 1, one per
 profiled technology per hour. A technology with no matching column is not
@@ -410,9 +443,10 @@ profiled, and the model prints a note rather than failing. The file must cover
 every hour in `demand.csv`.
 
 > The region row is a hook for multi-region support that never arrived, and
-> nothing consumes it. Whether it is removed is
-> [an open question](planning/onboarding_plan/11-profiles-region-header.md);
-> until it is settled, the two-row header above is what the parser requires.
+> nothing consumes it. Whether it is removed altogether is
+> [an open question](planning/onboarding_plan/11-profiles-region-header.md).
+> Accepting both shapes is what keeps archived runs restorable: every archived
+> `profiles.csv` has two rows, and the parser still understands them.
 
 ### Outputs
 
@@ -673,6 +707,6 @@ Recorded so they are not mistaken for decisions.
 - **No unit commitment.** Minimum generation, must-run, and start-up costs are
   ramping's natural neighbours and none of them exist. Start-up cost in
   particular is the more common way to express the cost of moving a plant.
-- **`inputs/plants.csv` header.** `Ramp_efficiency($/hr)` holds efficiencies in
+- **plants file header.** `Ramp_efficiency($/hr)` holds efficiencies in
   MWh/MWhTh, not dollars per hour. The model locates the column by prefix, so
   renaming it to `Ramp_efficiency (MWh/MWhTh)` is safe and would be an improvement.

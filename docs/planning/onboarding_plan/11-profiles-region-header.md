@@ -59,3 +59,24 @@ guarantee.
   that regions exist.
 
 ## Decision
+
+**Partial, 2026-08-27.** The parser now accepts both shapes — the option listed
+under "if it goes, what happens to archived runs?". `load_data` detects a region
+row by its empty first cell and reads the file with `header=[0, 1]` or `header=0`
+accordingly. New profile files can therefore be written with a single header row,
+while every archived `profiles.csv` stays readable and every past run stays
+restorable. `inputs/profiles_basic.csv` and `inputs/profiles_renewables.csv` are
+single-header; the worked-example fixtures are unchanged and still two-row.
+
+This was forced by a practical need, not by settling the question: the new
+profile variants were written single-header and would not load. It buys time
+rather than deciding anything.
+
+Still open, and still HITL:
+
+- **Does the region row go altogether?** Tolerating both shapes is not the same
+  as choosing one. The migration table above still applies if the answer is yes.
+- **Is `FRA` the right token?** Untouched, and still unexplained.
+- **Is multi-region on the roadmap?** Nobody has re-tested the assumption. Until
+  someone does, the flatten branch is speculative generality that now has a
+  second branch keeping it company.

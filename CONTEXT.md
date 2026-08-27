@@ -174,6 +174,21 @@ look like a merit-order violation.
 **Run** — one solve, archived under `run_archive/` with a manifest recording the
 git commit, input hashes and headline KPIs.
 
+**Run name** — what a run is filed under. A run given a name is filed under that
+name alone, and re-running with the same name replaces it, so the name denotes a
+*case* rather than an occasion. An unnamed run is filed under a timestamp
+instead, and those accumulate.
+
+**Input role** — what an input *is to the model* — plants, fuel, demand or
+profiles — as distinct from the file that fills it. `inputs/` holds more than one
+file for some roles, and a run picks one per role with `--plants`, `--fuel`,
+`--demand` and `--profiles`. The archive is keyed by role, so runs using
+different files stay comparable.
+
+**Source** — in a manifest, the file that filled a role, recorded next to the
+hash when it is not the role's plain name. Provenance, and the address a restore
+writes back to.
+
 **KPI** — a headline number stored in a run's manifest so that listing and diffing
 never has to reopen the result CSVs. Note that the `production_cost` KPI is fuel
 and VOM only and excludes ramp cost.

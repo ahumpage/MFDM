@@ -87,10 +87,14 @@ def sha256_file(path):
 
 
 def slugify(text, max_len=40):
-    """Filesystem safe fragment for a run id."""
+    """Filesystem safe fragment for a run id.
+
+    Underscores survive, so a run named output_basic is filed under exactly
+    that rather than under output-basic.
+    """
     if not text:
         return ""
-    slug = re.sub(r"[^A-Za-z0-9]+", "-", str(text).strip().lower())
+    slug = re.sub(r"[^A-Za-z0-9_]+", "-", str(text).strip().lower())
     return slug.strip("-")[:max_len]
 
 
@@ -130,6 +134,26 @@ def live_path(name):
     results/, so every read of a live file goes through here.
     """
     return (INPUTS_DIR if name in INPUT_FILES else RESULTS_DIR) / name
+
+
+def _relative_source(path):
+    """How the file filling a role should be named in a manifest.
+
+    A file in inputs/ is recorded by bare name, so the common case reads as
+    "plants_ramping.csv". A file from anywhere else keeps enough path to be
+    identifiable: relative to the repo root where it sits inside it, absolute
+    otherwise, since a run may legitimately read a file from anywhere.
+    """
+    path = Path(path).resolve()
+    try:
+        path.relative_to(INPUTS_DIR.resolve())
+        return path.name
+    except ValueError:
+        pass
+    try:
+        return path.relative_to(REPO_ROOT.resolve()).as_posix()
+    except ValueError:
+        return path.as_posix()
 
 
 def _ensure_dirs():
@@ -215,41 +239,78 @@ def compute_kpis(results, summary):
 # Archiving
 # --------------------------------------------------------------------------
 
-def archive_run(label=None, notes=None, solver_status=None, seconds=None):
+def archive_run(label=None, notes=None, solver_status=None, seconds=None,
+                input_paths=None, results_dir=None, run_id=None):
     """Snapshot the current inputs and results as a new run.
 
     Reads the live files from inputs/ and results/, so it must be called after
-    the results have been written.
+    the results have been written. A run that read or wrote somewhere else says
+    so with input_paths and results_dir, so that what gets archived is what the
+    run actually used.
+
+    input_paths maps each role in INPUT_FILES to the file that filled it. An
+    input is always stored under its role, so a run using plants_ramping.csv
+    stays directly comparable with one using plants_basic.csv; the file it
+    really came from is kept as the entry's "source".
+
+    run_id names the run folder outright, replacing any run of that name. Left
+    out, the id is the timestamp with the label slugged onto the end, which is
+    what keeps automatic snapshots from overwriting each other.
     """
     _ensure_dirs()
 
-    missing = [f for f in INPUT_FILES + OUTPUT_FILES if not live_path(f).exists()]
+    results_dir = Path(results_dir) if results_dir else RESULTS_DIR
+    paths = dict(input_paths or {})
+    for name in INPUT_FILES:
+        paths.setdefault(name, live_path(name))
+
+    def path_for(name):
+        return Path(paths[name]) if name in INPUT_FILES else results_dir / name
+
+    missing = [str(path_for(f)) for f in INPUT_FILES + OUTPUT_FILES
+               if not path_for(f).exists()]
     if missing:
         raise FileNotFoundError(
             "Cannot archive, missing: {}".format(", ".join(missing)))
 
     created = datetime.now()
-    run_id = created.strftime("%Y%m%dT%H%M%S")
-    slug = slugify(label)
-    if slug:
-        run_id = "{}_{}".format(run_id, slug)
 
-    # A second run inside the same second would otherwise collide.
-    run_dir = RUNS_DIR / run_id
-    suffix = 1
-    while run_dir.exists():
-        suffix += 1
-        run_dir = RUNS_DIR / "{}-{}".format(run_id, suffix)
-    run_id = run_dir.name
+    if run_id:
+        # A named run is a place, not an event: running the same case again
+        # replaces it, so the name always points at the latest version of it.
+        run_dir = RUNS_DIR / run_id
+        if run_dir.exists():
+            shutil.rmtree(str(run_dir))
+    else:
+        run_id = created.strftime("%Y%m%dT%H%M%S")
+        slug = slugify(label)
+        if slug:
+            run_id = "{}_{}".format(run_id, slug)
+
+        # A second run inside the same second would otherwise collide.
+        run_dir = RUNS_DIR / run_id
+        suffix = 1
+        while run_dir.exists():
+            suffix += 1
+            run_dir = RUNS_DIR / "{}-{}".format(run_id, suffix)
+        run_id = run_dir.name
+
     run_dir.mkdir(parents=True)
 
     inputs = {}
     for name in INPUT_FILES:
-        digest, size = store_blob(live_path(name))
-        inputs[name] = {"hash": digest, "size": size}
+        path = path_for(name)
+        digest, size = store_blob(path)
+        entry = {"hash": digest, "size": size}
+        source = _relative_source(path)
+        # Recorded only when it differs, so a run over the plain names leaves
+        # manifests exactly as they were and older ones stay comparable.
+        if source != name:
+            entry["source"] = source
+        inputs[name] = entry
 
     for name in OUTPUT_FILES:
-        shutil.copy2(str(live_path(name)), str(run_dir / name))
+        shutil.copy2(str(path_for(name)), str(run_dir / name))
 
     results = pd.read_csv(run_dir / "dispatch_results.csv")
     summary = pd.read_csv(run_dir / "plant_summary.csv", keep_default_na=False)
@@ -384,38 +445,67 @@ def load_input(run_id, name):
 # Restore
 # --------------------------------------------------------------------------
 
-def check_writable(names=None):
-    """Names of files that exist but cannot currently be written.
+def restore_targets(manifest):
+    """Where each of a run's inputs should be written back to.
+
+    A run records the file that filled each role, so a restore puts that file
+    back rather than materialising the role's plain name. Restoring a run that
+    used plants_ramping.csv therefore rewrites inputs/plants_ramping.csv, which
+    is the file a rerun will actually read. Manifests written before sources
+    were recorded carry none, and fall back to the plain name.
+
+    A source pointing outside inputs/ is deliberately not honoured: a restore
+    should never write to an arbitrary path elsewhere on disk, so it lands on
+    the plain name in inputs/ instead.
+    """
+    targets = {}
+    for name in INPUT_FILES:
+        source = (manifest.get("inputs", {}).get(name) or {}).get("source")
+        if source and "/" not in source and "\\" not in source:
+            targets[name] = INPUTS_DIR / source
+        else:
+            targets[name] = live_path(name)
+    return targets
+
+
+def check_writable(paths=None):
+    """Paths that exist but cannot currently be written.
 
     Worth checking before a restore: these CSVs are routinely open in Excel,
     which locks them on Windows. Without this, a restore could overwrite two
     files, hit a lock on the third and leave an inconsistent input set that
     matches no run at all.
     """
+    if paths is None:
+        paths = [live_path(n) for n in INPUT_FILES]
     blocked = []
-    for name in (names or INPUT_FILES):
-        path = live_path(name)
+    for path in paths:
+        path = Path(path)
         if not path.exists():
             continue
         try:
             with open(str(path), "ab"):
                 pass
         except (IOError, OSError):
-            blocked.append(name)
+            blocked.append(path.name)
     return blocked
 
 
 def restore(run_ref, snapshot_first=True):
     """Copy an archived run's inputs back into inputs/.
 
-    This overwrites the live input CSVs, so unless snapshot_first is turned
-    off the current state is archived first and its id returned alongside.
+    Each input goes back to the file it was read from, so that rerunning with
+    the same choices reproduces the run. See restore_targets.
+
+    This overwrites live input CSVs, so unless snapshot_first is turned off the
+    current state is archived first and its id returned alongside.
     """
     run_id = resolve(run_ref)
     manifest = get_manifest(run_id)
+    targets = restore_targets(manifest)
 
     # Fail before touching anything rather than part way through.
-    blocked = check_writable()
+    blocked = check_writable(list(targets.values()))
     if blocked:
         raise IOError(
             "Cannot restore: {} {} locked by another program (Excel keeps CSVs "
@@ -424,17 +514,22 @@ def restore(run_ref, snapshot_first=True):
 
     safety = None
     if snapshot_first:
-        # Only possible if a full set of files is present to snapshot.
-        have_all = all(live_path(f).exists() for f in INPUT_FILES + OUTPUT_FILES)
+        # Snapshots exactly the files about to be overwritten, so the safety
+        # run is a faithful record of what was there. Only possible if a full
+        # set is present to snapshot.
+        have_all = (all(Path(p).exists() for p in targets.values())
+                    and all(live_path(f).exists() for f in OUTPUT_FILES))
         if have_all:
             safety = archive_run(label=SAFETY_LABEL,
-                                 notes="Automatic snapshot before restoring {}".format(run_id))
+                                 notes="Automatic snapshot before restoring {}".format(run_id),
+                                 input_paths=targets)
 
     restored = []
     for name in INPUT_FILES:
         src = load_input(run_id, name)
-        shutil.copy2(str(src), str(live_path(name)))
-        restored.append(name)
+        target = Path(targets[name])
+        shutil.copy2(str(src), str(target))
+        restored.append(target.name)
 
     return {
         "restored_run": run_id,

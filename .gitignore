@@ -5,8 +5,8 @@ __pycache__/
 
 
 #personal runs shouldn't be in repo, but some example ones should 
-run_archive/
-
+run_archive
+run_archive/*
 # Word lock files
 ~$*
 

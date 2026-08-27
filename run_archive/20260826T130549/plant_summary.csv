@@ -1,6 +1,0 @@
-Plant,Technology,Fuel,Capacity (MW),Profiled,Marginal Cost ($/MWh),Ramp Rate (MW/hr),Ramping Efficiency (MWh/MWhTh),Ramp Premium ($/MWh),Total Generation (MWh),Available Energy (MWh),Curtailed (MWh),Curtailment (%),Share of Demand (%),Capacity Factor (%),Availability Factor (%),Hours Running,Hours Last in Stack,Total Ramp Up (MWh),Total Ramp Down (MWh),Ramp Cost ($),Production Cost ($)
-Plant 1,Solar,None,500.0,True,1.0,500.0,1.0,0.0,92088.49386,92225.0,136.50614,0.148014,19.963711,24.754971,24.791667,403,0,13813.49386,13813.49386,0.0,92088.49386
-Plant 2,Wind,None,300.0,True,2.0,300.0,1.0,0.0,76897.176705,82305.0,5407.823295,6.570468,16.67041,34.45214,36.875,722,0,6858.906233,6909.501033,0.0,153794.35341
-Plant 3,Coal,Coal,100.0,False,21.5,50.0,0.1,58.5,74400.0,74400.0,0.0,0.0,16.129052,100.0,100.0,744,8,0.0,0.0,0.0,1599600.0
-Plant 4,Gas,Gas,600.0,False,41.6,200.0,0.2,59.4,217047.872229,446400.0,0.0,0.0,47.053445,48.621835,100.0,736,674,13400.254893,13254.143653,1583271.273632,9029191.48471
-Plant 5,Gas,Gas,1000.0,False,76.0,400.0,0.2,33.0,845.904891,744000.0,0.0,0.0,0.183382,0.113697,100.0,62,62,845.904891,845.904891,55829.722793,64288.771701

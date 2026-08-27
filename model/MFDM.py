@@ -20,10 +20,21 @@ REPO_ROOT = BASE_DIR.parent
 INPUTS_DIR = REPO_ROOT / "inputs"
 RESULTS_DIR = REPO_ROOT / "results"
 
-PLANTS_FILE = INPUTS_DIR / "plants.csv"
-FUEL_FILE = INPUTS_DIR / "fuel.csv"
-DEMAND_FILE = INPUTS_DIR / "demand.csv"
-PROFILE_FILE = INPUTS_DIR / "profiles.csv"
+# The four inputs the model reads. Each is a *role* - plants, fuel, demand,
+# profiles - and the file filling it is chosen per run with the matching
+# command line flag, so inputs/ can hold alternatives side by side. The
+# defaults are the simple case: no ramp limits and no renewable profiles.
+DEFAULT_INPUT_NAMES = {
+    "plants": "plants_basic.csv",
+    "fuel": "fuel.csv",
+    "demand": "demand.csv",
+    "profiles": "profiles_basic.csv",
+}
+
+PLANTS_FILE = INPUTS_DIR / DEFAULT_INPUT_NAMES["plants"]
+FUEL_FILE = INPUTS_DIR / DEFAULT_INPUT_NAMES["fuel"]
+DEMAND_FILE = INPUTS_DIR / DEFAULT_INPUT_NAMES["demand"]
+PROFILE_FILE = INPUTS_DIR / DEFAULT_INPUT_NAMES["profiles"]
 
 # Generation below this counts as "not running", so solver round-off cannot
 # set the price.
@@ -52,6 +63,18 @@ PROFILE_TECHNOLOGIES = {
 
 # Load data
 
+def has_region_row(path):
+    """Whether a profiles file leads with a region row.
+
+    A region row has nothing in its first cell, because the column it heads is
+    the hour column, whose name lives on the row below. A file that starts
+    "hours,Wind,Solar" has no region row; one that starts ",FRA,FRA" does.
+    """
+    with open(str(path)) as fh:
+        first = fh.readline()
+    return first.lstrip("\ufeff").startswith(",")
+
+
 def load_data():
     for path in (PLANTS_FILE, FUEL_FILE, DEMAND_FILE, PROFILE_FILE):
         if not path.exists():
@@ -62,17 +85,23 @@ def load_data():
     fuel = pd.read_csv(FUEL_FILE)
     demand = pd.read_csv(DEMAND_FILE)
 
-    # profiles.csv has two header rows, a region row and a series row. Flatten
-    # them to "FRA wind (won)" so multi-region files stay unambiguous.
-    profile = pd.read_csv(PROFILE_FILE, header=[0, 1])
-    flat = []
-    for region, series in profile.columns:
-        region = "" if str(region).startswith("Unnamed") else str(region).strip()
-        series = str(series).strip()
-        flat.append("{} {}".format(region, series).strip())
-    profile.columns = flat
+    # The profiles file may carry one header row or two. Two rows are a region
+    # row above a series row, flattened to "FRA wind (won)" so a multi-region
+    # file stays unambiguous. One row is just the series names, which is the
+    # single-region case; there is no region to prefix, so the names are used
+    # as they stand. The region row is the one that starts with an empty cell,
+    # because its first column heading sits on the row below.
+    profile = pd.read_csv(PROFILE_FILE, header=[0, 1] if has_region_row(PROFILE_FILE)
+                                        else 0)
+    if isinstance(profile.columns, pd.MultiIndex):
+        flat = []
+        for region, series in profile.columns:
+            region = "" if str(region).startswith("Unnamed") else str(region).strip()
+            series = str(series).strip()
+            flat.append("{} {}".format(region, series).strip())
+        profile.columns = flat
 
-    for df in (plants, fuel, demand):
+    for df in (plants, fuel, demand, profile):
         df.columns = [c.strip() for c in df.columns]
     for col in ("Plant", "Technology", "Fuel"):
         plants[col] = plants[col].astype(str).str.strip()
@@ -846,6 +875,11 @@ def parse_args(argv=None):
                              "docs/examples/ramping/.")
     parser.add_argument("--results", default=None,
                         help="write the result CSVs here instead of results/")
+    for role, default in sorted(DEFAULT_INPUT_NAMES.items()):
+        parser.add_argument("--" + role, default=None,
+                            help="{} file to read: a name inside the input "
+                                 "folder, or a path (default: {})"
+                                 .format(role, default))
     return parser.parse_args(argv)
 
 
@@ -854,6 +888,9 @@ def use_directories(inputs=None, results=None):
     global INPUTS_DIR, RESULTS_DIR, PLANTS_FILE, FUEL_FILE, DEMAND_FILE, PROFILE_FILE
     if inputs is not None:
         INPUTS_DIR = Path(inputs).resolve()
+        # A whole folder of inputs is expected to use the plain role names,
+        # which is what the worked examples in docs/examples/ do. Individual
+        # files can still be overridden on top by use_files.
         PLANTS_FILE = INPUTS_DIR / "plants.csv"
         FUEL_FILE = INPUTS_DIR / "fuel.csv"
         DEMAND_FILE = INPUTS_DIR / "demand.csv"
@@ -862,13 +899,61 @@ def use_directories(inputs=None, results=None):
         RESULTS_DIR = Path(results).resolve()
 
 
+def resolve_input(name):
+    """Turn one --plants/--fuel/--demand/--profiles value into a path.
+
+    A bare file name is looked for in the input folder, so the usual case is
+    just `--plants plants_ramping.csv`. A value with a directory part is taken
+    as a path in its own right, which is what lets a file from outside inputs/
+    be used without moving it there first.
+    """
+    path = Path(name)
+    if path.parent == Path("."):
+        path = INPUTS_DIR / path
+    return path.resolve()
+
+
+def use_files(plants=None, fuel=None, demand=None, profiles=None):
+    """Choose the file filling each input role, leaving the others alone."""
+    global PLANTS_FILE, FUEL_FILE, DEMAND_FILE, PROFILE_FILE
+    if plants is not None:
+        PLANTS_FILE = resolve_input(plants)
+    if fuel is not None:
+        FUEL_FILE = resolve_input(fuel)
+    if demand is not None:
+        DEMAND_FILE = resolve_input(demand)
+    if profiles is not None:
+        PROFILE_FILE = resolve_input(profiles)
+
+
+def input_paths():
+    """The file filling each input role, keyed by the role's plain name.
+
+    The run archive files inputs by role rather than by file name, so that a
+    run using plants_ramping.csv stays directly comparable with one using
+    plants_basic.csv. The real name travels alongside as the entry's "source".
+    """
+    return {
+        "plants.csv": PLANTS_FILE,
+        "fuel.csv": FUEL_FILE,
+        "demand.csv": DEMAND_FILE,
+        "profiles.csv": PROFILE_FILE,
+    }
+
+
 def main(argv=None):
     args = parse_args(argv)
     use_directories(args.inputs, args.results)
+    use_files(args.plants, args.fuel, args.demand, args.profiles)
 
     print("\n" + "=" * 68)
     print("MY FIRST DISPATCH MODEL")
     print("=" * 68 + "\n")
+
+    # The choice of files is made by the caller, so say which ones were used.
+    for role, path in sorted(input_paths().items()):
+        print("  {:<10} {}".format(role[:-len(".csv")], path.name))
+    print("")
 
     plants, fuel, demand, profile = load_data()
     print("Loaded {} plants, {} fuels, {} hours, {} profile rows.\n"
@@ -901,16 +986,17 @@ def main(argv=None):
     warn_merit_order_departures(params, results)
 
     # A failure here must not lose the results, which are already on disk.
-    # Runs over custom directories are not archived: the archive records the
-    # state of inputs/ and results/, and a fixture run would misrepresent it.
-    if args.no_archive or args.inputs or args.results:
-        if args.inputs or args.results:
-            print("Not archived: this run used custom input or output folders.\n")
-    else:
+    # A run over custom files or folders is archived like any other, because
+    # the paths it actually used are handed to the archive rather than assumed.
+    if not args.no_archive:
         try:
             manifest = runstore.archive_run(
                 label=args.label, notes=args.notes,
-                solver_status=pulp.LpStatus[prob.status], seconds=solve_seconds)
+                solver_status=pulp.LpStatus[prob.status], seconds=solve_seconds,
+                input_paths=input_paths(), results_dir=RESULTS_DIR,
+                # A labelled run is named after its label alone, so rerunning
+                # the same case replaces it instead of piling up near-copies.
+                run_id=runstore.slugify(args.label) or None)
             git = manifest["git"]
             print("Archived as run: {}".format(manifest["id"]))
             if git.get("short"):

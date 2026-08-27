@@ -13,49 +13,97 @@ Needs **python 3.8**. Install the dependencies, which are pinned in
 pip install -r requirements.txt
 ```
 
-Then run the model, and then the dashboard:
+Then run it:
+
+```
+python run.py
+```
+
+`run.py` is a short, editable script. The five constants at the top of it pick
+the four input files and name the run:
+
+```python
+PLANTS = "plants_basic.csv"
+FUEL = "fuel.csv"
+DEMAND = "demand.csv"
+PROFILES = "profiles_basic.csv"
+OUTPUT_NAME = "output_basic"
+```
+
+It passes those four files to the model, solves, and then opens the dashboard on
+the result. Change a constant and run it again to try another case:
+`plants_ramping.csv` adds a ramp limit and `profiles_renewables.csv` adds hourly
+wind and solar shapes, and the two are independent, so any of the four
+combinations is a valid run. Give each case its own `OUTPUT_NAME` and you can
+compare them in the dashboard or with `runs.py diff`.
+
+A bare file name is looked for in `inputs/`. A value with a directory in it is
+used as a path, so a file kept anywhere else works too.
+
+The model writes CSVs into `results/`; the dashboard reads them. Ctrl-click the
+http://127.0.0.1:8050 link the dashboard prints, and Ctrl-C to stop.
+
+The two halves are still ordinary scripts, if you want one without the other:
 
 ```
 python model/MFDM.py
 python dashboard/dashboard.py
 ```
 
-The model writes CSVs into `results/`; the dashboard reads them. Ctrl-click the
-http://127.0.0.1:8050 link the dashboard prints. To rerun the model, close the
-dashboard first with Ctrl-C.
-
 ## What is in the repo
 
 ```
 requirements.txt        pinned dependencies, python 3.8
-inputs/                 plants.csv, fuel.csv, demand.csv, profiles.csv
+run.py                  edit the constants, run it: solves, then opens the dashboard
+inputs/                 the input CSVs, including alternatives to choose between
 model/MFDM.py           the dispatch model, reads inputs/ and writes results/
 results/                dispatch_results.csv, plant_summary.csv
 dashboard/dashboard.py  Dash app for presenting and QA-ing results
-run_archive/            past runs, one timestamped folder each
+run_archive/            past runs, one folder each
 docs/                   the documents listed under Further reading
 ```
 
-Every default run archives itself into a new folder under `run_archive/`, so that
-directory grows each time you run the model. `run_archive/runs.py` is the tool for
-working with it — `list`, `show`, `diff`, `restore`, `prune`.
+Every run archives itself under `run_archive/` unless you pass `--no-archive`.
+A run given a name is filed under that name, so re-running with the same
+`OUTPUT_NAME` replaces it and the name always points at the latest version of
+that case. A run with no name is filed under a timestamp instead, and those
+accumulate. `run_archive/runs.py` is the tool for working with the archive —
+`list`, `show`, `diff`, `restore`, `prune`.
+
+The archive files each input under its **role** — plants, fuel, demand,
+profiles — rather than under its file name, so a run using `plants_ramping.csv`
+is stored as `plants.csv` with `plants_ramping.csv` recorded as its source.
+That is what lets `runs.py diff` compare a basic run against a ramping one cell
+by cell. `runs.py show` prints the file each input came from, and `runs.py
+restore` writes each one back to that same file.
 
 ## Running with options
 
 ```
+python model/MFDM.py --plants plants_ramping.csv --label ramping
 python model/MFDM.py --inputs <folder> --results <folder>
 ```
 
-Reads the four input CSVs from somewhere other than `inputs/`, and writes results
-somewhere other than `results/`. This is how the worked examples in the semantics
-document are run.
+The four file flags choose which file fills each input role. `--inputs` and
+`--results` move the folders instead: `--inputs` expects `plants.csv`,
+`fuel.csv`, `demand.csv` and `profiles.csv` under exactly those names, which is
+how the worked examples in the semantics document are run. The two compose, so a
+file flag can override one role inside a custom folder.
+
+A run over custom files or folders is archived like any other, because the paths
+it used are recorded with it. Add `--no-archive` for a throwaway run you do not
+want kept.
 
 | Option | Effect |
 |---|---|
+| `--plants <file>` | File filling the plants role: a name inside the input folder, or a path |
+| `--fuel <file>` | File filling the fuel role |
+| `--demand <file>` | File filling the demand role |
+| `--profiles <file>` | File filling the profiles role |
 | `--inputs <folder>` | Read the four input CSVs from `<folder>` instead of `inputs/` |
 | `--results <folder>` | Write result CSVs to `<folder>` instead of `results/` |
 | `--no-archive` | Solve and write results without archiving the run |
-| `--label <name>` | Short name for this run, used in the archive id |
+| `--label <name>` | Name for this run. Becomes the archive id, replacing any run of that name |
 | `--notes <text>` | Longer description stored with the run |
 
 ## Two constants you will meet in the output

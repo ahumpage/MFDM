@@ -207,19 +207,12 @@ def run_options():
 
 
 def default_run_ids():
-    """What the dashboard opens on: the newest two archived runs.
+    #open on the newest two archived runs.
 
-    Deliberately not the working folder. The live results are normally a
-    byte-for-byte copy of the newest archive, because archiving happens right
-    after the model writes them, so defaulting A to "current" opened the
-    comparison on the same run twice and every delta chart read "no change".
-    """
     runs = runstore.list_runs()
     if len(runs) >= 2:
         return runs[0]["id"], runs[1]["id"]
     if len(runs) == 1:
-        # Nothing to compare against, so open on the one run with B empty
-        # rather than pairing it with the working folder it is a copy of.
         return runs[0]["id"], None
     return CURRENT_ID, None
 
@@ -234,7 +227,7 @@ def slice_hours(run, lo, hi):
 
 
 def aggregate(run, df, resolution):
-    """Aggregate to daily or weekly buckets; energy summed, price load-weighted."""
+    #Aggregate to daily or weekly buckets; energy summed, price load-weighted
     if resolution == "hourly" or df.empty:
         out = df.copy()
         out["x"] = out["Hour"]
@@ -284,8 +277,7 @@ def energy_label(resolution):
 
 
 def base_layout(fig, title, xlabel, ylabel, y2label=None, height=470):
-    # The top margin has to hold the title and the horizontal legend in
-    # separate bands. At t=50 they collided and the legend covered the title.
+
     top = 108
     fig.update_layout(
         title=dict(text=title, x=0.01, y=0.97, yanchor="top", yref="container",
@@ -303,9 +295,7 @@ def base_layout(fig, title, xlabel, ylabel, y2label=None, height=470):
     fig.update_yaxes(gridcolor=GRID, zeroline=False)
 
     if y2label is not None:
-        # Grid off on the right axis so it does not cross-hatch the stack.
-        # This re-specifies margin, so it must carry the same top value or
-        # the title would be covered again.
+
         fig.update_layout(
             yaxis2=dict(title=y2label, overlaying="y", side="right",
                         showgrid=False, zeroline=False, rangemode="tozero"),
@@ -327,34 +317,17 @@ def empty_figure(message):
 
 # Figures
 
-# Legend groups for the dispatch overlays. Plants group under their own name,
-# so these need a prefix that no plant can collide with.
 GROUP_DEMAND = "__demand"
 GROUP_PRICE = "__price"
 
 
 def dispatch_mode(agg):
-    """Whether a dispatch chart of this many periods draws bars or an area.
-
-    Stacked bars are honest about the data being discrete periods, but below
-    about 2px wide they stop being readable, so wide windows fall back to a
-    filled area. The mode is named in the title so the switch is not silent.
-    """
+    #bars or area
     return len(agg) <= BAR_THRESHOLD
 
 
 def dispatch_traces(run, agg, plants, overlays, resolution, stackgroup="one"):
-    """The traces of one dispatch stack, without any layout around them.
 
-    Returns a list of (trace, on_price_axis) pairs, in draw order: the
-    selected plants cheapest first, then the demand and price overlays. Split
-    out from fig_dispatch so the comparison can pour two runs' worth of traces
-    into a single two-panel figure and hang one legend off them both.
-
-    Every trace carries a legendgroup, which is the plant name for a stack
-    trace and GROUP_* for an overlay. In a single-run figure that is harmless;
-    in the comparison it is what makes one legend entry toggle both panels.
-    """
     use_bars = dispatch_mode(agg)
     traces = []
 
@@ -379,8 +352,6 @@ def dispatch_traces(run, agg, plants, overlays, resolution, stackgroup="one"):
                 name=name, legendgroup=p, mode="lines",
                 line=dict(width=0.5, color=m["colour"]),
                 fillcolor=m["colour"],
-                # Stack groups are per panel, so the comparison passes a
-                # distinct group per run to stop A's area stacking onto B's.
                 stackgroup=stackgroup,
                 hovertemplate=hover,
             ), False))
@@ -393,11 +364,8 @@ def dispatch_traces(run, agg, plants, overlays, resolution, stackgroup="one"):
             hovertemplate="%{y:,.1f} MWh<extra>Demand</extra>",
         ), False))
 
-    # Clearing price on a right-hand axis. Generation runs to ~764 MWh and
-    # price only to $41.60, so they cannot share an axis meaningfully.
     if "price" in overlays:
-        # "hvh" rather than "hv" so the step is centred on the hour: a bar at
-        # x spans x-0.5 to x+0.5, so the riser must sit on the bar edge.
+
         shape = "hvh" if resolution == "hourly" else "linear"
         price_name = ("Clearing price" if resolution == "hourly"
                       else "Load-weighted avg price")

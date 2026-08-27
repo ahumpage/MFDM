@@ -115,6 +115,8 @@ def cmd_show(args):
     print("\n  inputs")
     for name, entry in m["inputs"].items():
         print("    {:<16} {}  {:>9,} bytes".format(name, entry["hash"], entry["size"]))
+        if entry.get("source"):
+            print("    {:<16} read from {}".format("", entry["source"]))
 
     print("\n  source files")
     for name, digest in sorted(m.get("code", {}).items()):
@@ -237,8 +239,9 @@ def cmd_diff(args):
 def cmd_restore(args):
     run_id = runstore.resolve(args.run)
     m = runstore.get_manifest(run_id)
+    targets = runstore.restore_targets(m)
 
-    blocked = runstore.check_writable()
+    blocked = runstore.check_writable(list(targets.values()))
     if blocked:
         print("Cannot restore: the following are locked by another program")
         for name in blocked:
@@ -251,7 +254,7 @@ def cmd_restore(args):
         run_id, m.get("label") or "no label"))
     print("This overwrites the following in the working folder:")
     for name in runstore.INPUT_FILES:
-        print("  {}".format(name))
+        print("  {}".format(targets[name].name))
 
     if not args.yes:
         answer = input("Continue? Current inputs are snapshotted first. [y/N] ")
