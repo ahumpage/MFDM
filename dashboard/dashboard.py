@@ -478,7 +478,7 @@ def fig_price_duration(run, hourly):
     return base_layout(fig, "Price duration curve (hourly)",
                        "Percent of hours (%)", "Clearing price ($/MWh)")
 
-
+"""
 def fig_load_duration(run, hourly, plants):
     if hourly.empty:
         return empty_figure("No hours in the selected range")
@@ -508,7 +508,7 @@ def fig_load_duration(run, hourly, plants):
     fig.update_layout(showlegend=False)
     return base_layout(fig, "Load duration curve vs cumulative capacity (hourly)",
                        "Percent of hours (%)", "Demand (MWh)")
-
+"""
 
 def fig_energy_mix(run, hourly, plants):
     if hourly.empty or not plants:
@@ -1826,10 +1826,11 @@ def update_price_duration(rng):
     Input("store-range", "data"),
     Input("plant-toggle", "value"),
 )
-def update_load_duration(rng, plants):
-    run = get_run(rng.get("run"))
-    return fig_load_duration(run, slice_hours(run, rng["lo"], rng["hi"]),
-                             plants or [])
+
+#def update_load_duration(rng, plants):
+ #   run = get_run(rng.get("run"))
+   # return fig_load_duration(run, slice_hours(run, rng["lo"], rng["hi"]),
+   #                         plants or [])
 
 
 @app.callback(
