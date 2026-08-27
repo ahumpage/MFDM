@@ -34,3 +34,28 @@ Decide:
   `run-refresh` button, so a long-running dashboard plus a refresh may beat relaunching
   it. That would make the wrapper only start one if none is running — more moving
   parts, but no lost browser state.
+
+## Settled early: the compare default
+
+Two of the bullets above were answered ahead of the rest, while making the comparison
+readable. **Status stays `open`** — the wrapper script, the browser-opening and the
+restart question are all still undecided, and this ticket is still the place they get
+decided. Recorded here so that work does not reopen them.
+
+**What "previous" means.** Confirmed as stated: the second-newest *archived* run. The
+dashboard opened on the working folder against the newest archive, which after any
+rerun are the same numbers, so every delta chart read "no change" and the comparison
+was worthless by default. The working folder is now not part of the default pair at
+all; it stays selectable for the case where results have been written but not archived.
+
+**The first run, with no previous.** With exactly one archived run, A is that run and B
+is empty; the compare tab shows its "Pick a run" message. Deliberately *not* paired
+with the working folder, for the reason above — it would be the same run twice, which
+is the bug being fixed. With no archived runs at all, A falls back to the working
+folder.
+
+**Where the default is expressed.** In the layout at import time, via a new
+`default_run_ids()`, not in `refresh_run_lists`. Expressing it in the callback meant it
+was reapplied on every refresh, so deliberately clearing "Compare with" and pressing
+Refresh silently undid the clearing. The callback now only enforces that A and B are
+different runs; choosing the opening pair is a startup concern and happens once.
