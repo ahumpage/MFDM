@@ -66,7 +66,15 @@ BAR_THRESHOLD = 200
 
 PLOT_BG = "#FFFFFF"
 GRID = "#E6E6E6"
-PAIR_MARGIN_TOP = 135
+PAIR_MARGIN_TOP = 118
+
+# Standard chart heights. CHART_H is the default for a full chart; CHART_H_THIN
+# is for a chart that only needs to show a line or two and can afford to be
+# short; PAIR_H is the side-by-side A|B dispatch figure, which carries two
+# panels and so needs a little more room.
+CHART_H = 400
+CHART_H_THIN = 230
+PAIR_H = 430
 
 
 # Data loading
@@ -252,20 +260,24 @@ def energy_label(resolution):
         {"daily": "day", "weekly": "week"}[resolution])
 
 
-def base_layout(fig, title, xlabel, ylabel, y2label=None, height=470):
+def base_layout(fig, title, xlabel, ylabel, y2label=None, height=CHART_H):
 
-    top = 108
+    # A thin chart cannot afford a full-size title block and axis gutter, or
+    # the chrome would leave almost no room for the line itself.
+    thin = height <= CHART_H_THIN
+    top, bottom = (58, 36) if thin else (92, 45)
     fig.update_layout(
         title=dict(text=title, x=0.01, y=0.97, yanchor="top", yref="container",
-                   font=dict(size=15)),
+                   font=dict(size=13 if thin else 15)),
         xaxis_title=xlabel,
         yaxis_title=ylabel,
         plot_bgcolor=PLOT_BG,
         paper_bgcolor=PLOT_BG,
-        margin=dict(l=60, r=30, t=top, b=45),
+        margin=dict(l=60, r=30, t=top, b=bottom),
         height=height,
         hovermode="x unified",
-        legend=dict(orientation="h", yanchor="bottom", y=1.06, xanchor="left", x=0),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02 if thin else 1.06,
+                    xanchor="left", x=0, font=dict(size=11) if thin else None),
     )
     fig.update_xaxes(gridcolor=GRID, zeroline=False)
     fig.update_yaxes(gridcolor=GRID, zeroline=False)
@@ -275,18 +287,19 @@ def base_layout(fig, title, xlabel, ylabel, y2label=None, height=470):
         fig.update_layout(
             yaxis2=dict(title=y2label, overlaying="y", side="right",
                         showgrid=False, zeroline=False, rangemode="tozero"),
-            margin=dict(l=60, r=65, t=top, b=45),
+            margin=dict(l=60, r=65, t=top, b=bottom),
         )
     return fig
 
 
-def empty_figure(message):
+def empty_figure(message, height=CHART_H):
     fig = go.Figure()
     fig.add_annotation(text=message, showarrow=False,
                        xref="paper", yref="paper", x=0.5, y=0.5,
                        font=dict(size=14, color="#888"))
-    # Same height as base_layout so cards do not jump when a range is empty.
-    fig.update_layout(plot_bgcolor=PLOT_BG, paper_bgcolor=PLOT_BG, height=470,
+    # Same height as the chart it stands in for, so cards do not jump when a
+    # range is empty. Callers drawing a thin chart must pass its height.
+    fig.update_layout(plot_bgcolor=PLOT_BG, paper_bgcolor=PLOT_BG, height=height,
                       xaxis=dict(visible=False), yaxis=dict(visible=False))
     return fig
 
@@ -876,7 +889,11 @@ app = Dash(__name__)
 app.title = "Dispatch Model Dashboard"
 
 CARD = {"backgroundColor": "#FFFFFF", "border": "1px solid #E0E0E0",
-        "borderRadius": "6px", "padding": "14px", "marginBottom": "14px"}
+        "borderRadius": "6px", "padding": "10px", "marginBottom": "10px"}
+
+# The small italic caption under a chart, explaining how to read it.
+NOTE = {"fontSize": "11.5px", "color": "#888", "fontStyle": "italic",
+        "padding": "0 10px 6px 10px"}
 
 
 def hour_marks(lo, hi):
@@ -1035,8 +1052,7 @@ app.layout = html.Div([
                     "Note: hiding a plant only removes it from the chart, it does not "
                     "re-solve the model. The stack will drop below the demand line; "
                     "that gap is a display filter, not unserved energy.",
-                    style={"fontSize": "12px", "color": "#888", "fontStyle": "italic",
-                           "padding": "0 14px 10px 14px"}),
+                    style=NOTE),
             ], style=CARD),
             html.Div([dcc.Graph(id="graph-price")], style=CARD),
             html.Div([dcc.Graph(id="graph-costs")], style=CARD),
@@ -1073,8 +1089,7 @@ app.layout = html.Div([
                     "Duration curves always use hourly data. Averaging over days or "
                     "weeks would flatten the peaks these curves exist to show, so the "
                     "resolution setting does not apply here.",
-                    style={"fontSize": "12px", "color": "#888", "fontStyle": "italic",
-                           "padding": "0 14px 10px 14px"}),
+                    style=NOTE),
             ], style=CARD),
             html.Div([dcc.Graph(id="graph-energy-mix")], style=CARD),
         ]),
@@ -1093,14 +1108,16 @@ app.layout = html.Div([
             html.Div([
                 dcc.Graph(id="graph-compare-dispatch-pair"),
                 html.Div(
-                    "Both panels share one y-axis, and one price axis when that "
-                    "overlay is on, so a taller stack really is more generation. "
-                    "One legend drives both panels: clicking a plant hides it in "
-                    "A and B together, and clicking again brings it back. The "
-                    "Plants checklist above is separate, and decides which plants "
-                    "reach the charts at all.",
-                    style={"fontSize": "12px", "color": "#888",
-                           "fontStyle": "italic", "padding": "0 14px 10px 14px"}),
+                    "Both panels share a y-axis (and price axis), and one "
+                    "legend that toggles a plant in A and B together.",
+                    style=NOTE),
+            ], style=CARD),
+
+            # Price sits directly under the stacks: the stack shows who ran,
+            # the price shows what that cost, on the same x-axis.
+            html.Div([
+                dcc.Graph(id="graph-compare-price"),
+                dcc.Graph(id="graph-compare-price-diff"),
             ], style=CARD),
 
             html.Div([
@@ -1108,13 +1125,7 @@ app.layout = html.Div([
                 html.Div(
                     "The bars break the difference down by plant: above zero the "
                     "plant generated more in B, below zero more in A.",
-                    style={"fontSize": "12px", "color": "#888",
-                           "fontStyle": "italic", "padding": "0 14px 10px 14px"}),
-            ], style=CARD),
-
-            html.Div([
-                dcc.Graph(id="graph-compare-price"),
-                dcc.Graph(id="graph-compare-price-diff"),
+                    style=NOTE),
             ], style=CARD),
 
             html.Div([html.Div(id="compare-plants")], style=CARD),
@@ -1123,7 +1134,7 @@ app.layout = html.Div([
 
     dcc.Store(id="store-range"),
 ], style={"fontFamily": "Segoe UI, Helvetica, Arial, sans-serif",
-          "backgroundColor": "#F4F5F7", "padding": "18px", "minHeight": "100vh"})
+          "backgroundColor": "#F4F5F7", "padding": "12px", "minHeight": "100vh"})
 
 
 # Comparison
@@ -1407,7 +1418,7 @@ def fig_compare_dispatch_pair(a, b, lo, hi, resolution, plants, overlays):
     agg_a = aggregate(a, slice_hours(a, lo, hi), resolution)
     agg_b = aggregate(b, slice_hours(b, lo, hi), resolution)
     if agg_a.empty and agg_b.empty:
-        return empty_figure("No hours in the selected range")
+        return empty_figure("No hours in the selected range", PAIR_H)
 
     overlays = [o for o in (overlays or []) if o in DISPATCH_OVERLAYS]
     show_price = "price" in overlays
@@ -1466,7 +1477,7 @@ def fig_compare_dispatch_pair(a, b, lo, hi, resolution, plants, overlays):
         plot_bgcolor=PLOT_BG,
         paper_bgcolor=PLOT_BG,
         margin=dict(l=60, r=65, t=PAIR_MARGIN_TOP, b=45),
-        height=540,
+        height=PAIR_H,
         hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.10,
                     xanchor="left", x=0,
@@ -1492,7 +1503,7 @@ def fig_compare_price_overlay(a, b, lo, hi, resolution):
     agg_a = aggregate(a, slice_hours(a, lo, hi), resolution)
     agg_b = aggregate(b, slice_hours(b, lo, hi), resolution)
     if agg_a.empty or agg_b.empty:
-        return empty_figure("No overlapping hours to compare")
+        return empty_figure("No overlapping hours to compare", CHART_H_THIN)
 
 
     shape = "hvh" if resolution == "hourly" else "linear"
@@ -1512,20 +1523,21 @@ def fig_compare_price_overlay(a, b, lo, hi, resolution):
     ylab = ("Clearing price ($/MWh)" if resolution == "hourly"
             else "Load-weighted avg price ($/MWh)")
     return base_layout(fig, "Market clearing price: A and B",
-                       axis_label(resolution), ylab)
+                       axis_label(resolution), ylab, height=CHART_H_THIN)
 
 
 def fig_compare_price_diff(a, b, lo, hi, resolution):
     agg_a = aggregate(a, slice_hours(a, lo, hi), resolution)
     agg_b = aggregate(b, slice_hours(b, lo, hi), resolution)
     if agg_a.empty or agg_b.empty:
-        return empty_figure("No overlapping hours to compare")
+        return empty_figure("No overlapping hours to compare", CHART_H_THIN)
 
     shape = "hvh" if resolution == "hourly" else "linear"
 
     agg_a, agg_b, dropped = align_runs(agg_a, agg_b)
     if agg_a.empty:
-        return empty_figure("The two runs share no periods in this window")
+        return empty_figure("The two runs share no periods in this window",
+                            CHART_H_THIN)
 
     diff = agg_b[PRICE_COL].values - agg_a[PRICE_COL].values
 
@@ -1540,7 +1552,8 @@ def fig_compare_price_diff(a, b, lo, hi, resolution):
 
     fig = base_layout(fig, "Change in clearing price, B minus A{}".format(
                           dropped_note(dropped)),
-                      axis_label(resolution), "Change ($/MWh)", height=300)
+                      axis_label(resolution), "Change ($/MWh)",
+                      height=CHART_H_THIN)
 
 
     reach = float(np.abs(diff).max()) if len(diff) else 0.0

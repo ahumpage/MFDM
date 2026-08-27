@@ -16,3 +16,5 @@ model = subprocess.call([sys.executable, str(ROOT / "model" / "MFDM.py"),
                          "--label", OUTPUT_NAME])
 if model == 0:
     subprocess.call([sys.executable, str(ROOT / "dashboard" / "dashboard.py")])
+
+# quickstart, just run dashboard.py, there are some examples ready to go
