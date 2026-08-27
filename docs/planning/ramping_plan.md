@@ -3,9 +3,15 @@
 `wayfinder:map` — the map for this effort. Tickets are the files in `ramping_plan/`.
 
 **Status: closed.** Every ticket is resolved. The spec is
-[docs/ramping_semantics.md](../ramping_semantics.md), and — unlike the plan below
+[docs/model_semantics.md](../model_semantics.md), and — unlike the plan below
 anticipated — the implementation landed in the same effort. See
 [What actually happened](#what-actually-happened).
+
+> Renamed since. This map was written when the spec was called
+> `docs/ramping_semantics.md`; references to that filename below are historical.
+> It became `docs/model_semantics.md` because roughly 70% of it was always
+> model-wide rather than ramping-specific — see
+> [Which document owns which fact?](onboarding_plan/01-doc-set-ownership.md).
 
 ## Destination
 
@@ -55,7 +61,7 @@ Premises, not steps on the route. Recorded so no ticket reopens them by accident
   every plant starts wherever it likes, free of charge. The horizon does not wrap.
   `HOURS` must be ascending and contiguous — true of `demand.csv` today (744 rows,
   hours 1–744, sorted, no gaps, no duplicates) but unvalidated, since `HOURS` is taken
-  straight from row order (`MFDM.py:161`). `build_parameters` gains that check at
+  straight from row order. `build_parameters` gains that check at
   implementation time.
 - **Ramp-down infeasibility is solved with a priced spill variable.** A ramp-down
   limit puts a *floor* under a plant, which can force total generation above demand
@@ -76,7 +82,7 @@ Premises, not steps on the route. Recorded so no ticket reopens them by accident
   so up and down cost the same per MWh and share one rate limit. Splitting them is a
   later effort.
 - **Ramping efficiency never exceeds normal efficiency**, so ramp cost is never
-  negative. Validated on load, mirroring the existing efficiency guard (`MFDM.py:193`).
+  negative. Validated on load, mirroring the existing efficiency guard.
 
 ## Decisions so far
 

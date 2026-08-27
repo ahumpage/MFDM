@@ -10,7 +10,7 @@
 
 The QA list asks that a zero-demand test returns a zero shadow price in every hour.
 That holds for the *merit-order* price, which falls back to `0.0` when nothing is
-running (MFDM.py:389). It does not hold for the *dual*: the shadow price of the energy
+running. It does not hold for the *dual*: the shadow price of the energy
 balance at zero demand is the cost of serving one more MWh, which is the cheapest
 available plant's marginal cost, not zero.
 
@@ -22,6 +22,6 @@ Decide what a no-dispatch hour should report:
 - If the two columns legitimately disagree at zero demand, does that hour get exempted
   from the check in [When may the shadow price differ?](02-degenerate-price-tolerance.md),
   or is it a separate rule?
-- `check_demand` (MFDM.py:280) already warns that zero demand is usually a data-entry
+- `warn_nonpositive_demand` already warns that zero demand is usually a data-entry
   slip. Is a zero-demand hour a *scenario the model supports*, or an input error the
   QA pass should reject outright? Those lead to different checks.

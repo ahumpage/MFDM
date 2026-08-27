@@ -9,10 +9,10 @@
 ## Question
 
 The invariants are decided by the blocking tickets. This one decides the QA pass as an
-artifact. Today the checking is scattered and ephemeral: `check_demand` (MFDM.py:280)
-and `check_feasibility` (MFDM.py:294) run before the solve, the price-mismatch note
-sits inside `build_results` (MFDM.py:426), and the energy balance check is a print
-statement at the end of `report` (MFDM.py:552). All of it goes to stdout and is lost
+artifact. Today the checking is scattered and ephemeral: `warn_nonpositive_demand`
+and `check_feasibility` run before the solve, the price-mismatch note
+sits inside `build_hourly_results`, and the energy balance check is a print
+statement at the end of `report`. All of it goes to stdout and is lost
 the moment the terminal scrolls.
 
 Decide:

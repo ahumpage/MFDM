@@ -1,12 +1,29 @@
-# Ramping semantics in MFDM
+# Model semantics in MFDM
 
-What ramping *means* in this model: how a plant's movement between hours becomes
-a cost, what limits that movement, what happens when a plant cannot slow down
-fast enough, what the reported prices represent once cost is intertemporal, and
-which output columns exist.
+What this model *means*, as opposed to what it computes. The maths itself — sets,
+parameters, objective, constraints — is in [README.md](../README.md), and so is
+everything about running it. This document owns the reasoning underneath.
 
-Charted in [docs/planning/ramping_plan.md](planning/ramping_plan.md). Implemented
-in `model/MFDM.py`.
+Most of it is downstream of one change: **ramping couples the hours**. That is why
+the price is a dual, why the merit-order check lost its authority, and why spill
+exists at all, so ramping is introduced first and the general consequences follow.
+
+| Section | What it owns |
+|---|---|
+| [1. The problem ramping introduces](#1-the-problem-ramping-introduces) | Why hours stopped being independent |
+| [2. Ramp rate](#2-ramp-rate-what-limits-movement) | What limits movement |
+| [3. Ramp cost](#3-ramp-cost-how-movement-becomes-money) | How movement becomes money |
+| [4. Spill](#4-spill-when-a-plant-cannot-slow-down) | Spill vs curtailment, and why `SPILL_COST` is what it is |
+| [5. What the reported price means](#5-what-the-reported-price-means) | **The clearing price.** Applies model-wide |
+| [6. The merit-order check](#6-the-merit-order-check-gives-up-its-authority) | Its status. Applies model-wide |
+| [7. The CSV contract](#7-the-csv-contract) | **Every input and output column.** Applies model-wide |
+| [8. Worked example](#8-worked-example) | Two runnable three-hour fixtures |
+| [9. What changed in the full run](#9-what-changed-in-the-full-run) | Before and after, over 744 hours |
+| [10. Known gaps](#10-known-gaps) | Not decisions |
+
+Charted in [docs/planning/ramping_plan.md](planning/ramping_plan.md) and
+[docs/planning/onboarding_plan.md](planning/onboarding_plan.md). Implemented in
+`model/MFDM.py`.
 
 ---
 
@@ -57,7 +74,7 @@ This is visible in the worked example below, where a plant moves 60 MWh in hour 
 for nothing and then pays $200 to move 10 MWh in hour 2.
 
 Because the constraints link each hour to *the previous row of `demand.csv`*, the
-hours must be ascending, contiguous and free of duplicates. `check_hours` enforces
+hours must be ascending, contiguous and free of duplicates. `check_horizon` enforces
 this. Before ramping it did not matter; now a stray sort order would quietly
 constrain the wrong pairs of hours and still solve.
 
@@ -148,15 +165,15 @@ Both names are kept; see [CONTEXT.md](../CONTEXT.md).
 | Price | Free | `SPILL_COST` |
 | In the LP | Implicit — it is just `avail - gen` | An explicit decision variable |
 
-### Why spill is priced at $1,000/MWh and not at VOLL
+### Why spill is priced at $1,000/MWh and not at LoL
 
-The obvious choice is to price spill at VOLL, mirroring unserved energy exactly.
-It was the choice this effort started with, and it is wrong. **At VOLL, spill is
+The obvious choice is to price spill at LoL, mirroring unserved energy exactly.
+It was the choice this effort started with, and it is wrong. **At LoL, spill is
 strictly dominated by shedding load and never happens at all.**
 
 The two are not symmetric in cost:
 
-- Shedding a MWh **removes** a MWh of generation, so it saves `VOLL - marginal_cost`.
+- Shedding a MWh **removes** a MWh of generation, so it saves `LoL - marginal_cost`.
 - Dumping a MWh **requires** a MWh of extra generation, so it costs `SPILL_COST + marginal_cost`.
 
 Set the two constants equal and shedding is always cheaper, by twice the marginal
@@ -168,17 +185,17 @@ Measured on the Scenario 2 fixture below:
 
 | Spill price | What the model does | Objective |
 |---|---|---:|
-| VOLL ($8,300) | **Sheds 50 MWh of peak demand**, spills nothing | $418,800 |
-| VOLL, spill forced instead | Dumps 50 MWh | $420,600 |
+| LoL ($8,300) | **Sheds 50 MWh of peak demand**, spills nothing | $418,800 |
+| LoL, spill forced instead | Dumps 50 MWh | $420,600 |
 | $1,000 | Serves all demand, dumps 50 MWh | **$55,600** |
 
-The VOLL model blacks out half of peak demand rather than dump a surplus later,
+The LoL model blacks out half of peak demand rather than dump a surplus later,
 and the `spill` variable — introduced precisely to keep the model feasible under
 ramp-down floors — never leaves zero.
 
 `SPILL_COST = 1000` is chosen for two properties. It sits far above the most
 expensive plant's marginal cost ($76/MWh), so spill stays firmly last in the
-stack and is never a cheap way to avoid generating. And it sits far below VOLL,
+stack and is never a cheap way to avoid generating. And it sits far below LoL,
 so dumping surplus is always preferred to shedding real load. It is a modelling
 constant, not a physical quantity, and is worth revisiting.
 
@@ -193,7 +210,7 @@ resource in the earlier hour.
 
 **This is not infeasibility, and that is what makes it dangerous.** The
 all-zeros dispatch satisfies every ramp constraint, so the LP can always retreat
-towards it and price the demand at VOLL instead. The model does not fail; it
+towards it and price the demand at LoL instead. The model does not fail; it
 returns an absurdly expensive answer and says nothing.
 
 The model therefore allows a cost-free ramp-down beyond the rate limit, bounded by
@@ -217,7 +234,7 @@ Measured on a deliberately hostile fixture — a 500 MW solar farm limited to
 
 Without the allowance the solar farm may use 10 MWh of a 500 MWh peak, because
 anything more would strand it above its hour-2 ceiling, and 58% of demand goes
-unserved at VOLL.
+unserved at LoL.
 
 On the current inputs this never binds, because wind and solar both have a ramp
 rate equal to nameplate. It exists so that editing one number in `plants.csv`
@@ -260,7 +277,7 @@ up and then back down again. No plant offers $160.40. The system does.
 `Highest Running Cost ($/MWh)` is the old merit-order calculation under the name
 of what it actually measures: the marginal cost of the most expensive plant
 generating. It is a "who was last in the stack" diagnostic and **it is not a
-price**. It is used by `check_merit_order` and by `plant_summary.csv`, and must
+price**. It is used by `warn_merit_order_departures` and by `plant_summary.csv`, and must
 not be used for revenue or surplus.
 
 ### The mismatch counter is gone
@@ -273,7 +290,7 @@ the counter and its now-false explanation are deleted.
 ### A spill hour prices negative
 
 In a scarcity hour the marginal MWh is shed, so lost load is the marginal unit and
-the price is VOLL. In a spill hour the marginal MWh is being *destroyed*, so one
+the price is LoL. In a spill hour the marginal MWh is being *destroyed*, so one
 more MWh of demand would **save** a MWh from destruction. The price is negative.
 
 This falls out of the dual with no special case, and it is the model's first
@@ -285,9 +302,9 @@ When the price is negative, `Market Cost ($)` for that hour is negative too: the
 model is reporting that consumers were paid to take power. `report()` prints a
 note whenever this happens so the figure is never encountered without warning.
 
-### `describe_price_setter` under a dual
+### `name_last_in_stack` under a dual
 
-`describe_price_setter` is only used for the *diagnostic* column, never for the
+`name_last_in_stack` is only used for the *diagnostic* column, never for the
 clearing price, so it still resolves to a plant name in the ordinary case. It
 gains a `-SPILL_COST` case naming "spilled energy", and otherwise falls back to
 "something at $X/MWh" — which is now the honest answer far more often.
@@ -296,7 +313,7 @@ gains a `-SPILL_COST` case naming "spilled energy", and otherwise falls back to
 
 ## 6. The merit-order check gives up its authority
 
-`check_merit_order` used to **raise**, and `main` treated it as fatal. Its
+`warn_merit_order_departures` used to **raise**, and `main` treated it as fatal. Its
 invariant: no plant may generate strictly below its dispatch ceiling while
 something strictly more expensive is generating.
 
@@ -334,11 +351,76 @@ rather than a bill, because some of that headroom is legitimately forgone.
 
 ---
 
-## 7. Output schema
+## 7. The CSV contract
 
-A column is a claim about meaning, so each one is listed with what it claims.
+Every file the model reads and every file it writes. A column is a claim about
+meaning, so each one is listed with what it claims.
 
-### `results/dispatch_results.csv`
+### Inputs
+
+All four live in `inputs/` by default, or in the folder given to `--inputs`. All
+four must be present; a missing one is a `FileNotFoundError` naming the path.
+
+#### `inputs/plants.csv` — one row per plant
+
+| Column | Meaning |
+|---|---|
+| `Plant` | The plant's name, and its identity throughout the outputs. Must be unique. |
+| `Technology` | `Coal`, `Gas`, `Wind` or `Solar`. Decides whether the plant is profiled. |
+| `Fuel` | Looked up in `fuel.csv`. Wind and solar carry the literal string `None`, which is read as text and not as a missing value. |
+| `Capacity (MW)` | Nameplate. The plant's ceiling in any hour, before profiles and ramping. |
+| `Efficiency (MWh/MWhTh)` | Steady-state efficiency. Electrical MWh out per thermal MWh in. |
+| `VOM ($/MWh)` | Variable operating and maintenance cost, charged on every MWh whether the plant is moving or not. |
+| `Ramp_rate (MW/hr)` | The most the plant may move between adjacent hours, in either direction. |
+| `Ramp_efficiency(MWh/MWhTh)` | Efficiency while moving. Validated never to exceed `Efficiency`; see [§3](#ramping-is-never-cheaper-than-steady-running). Located by column-name prefix, so the exact spacing does not matter. |
+
+#### `inputs/fuel.csv` — one row per fuel
+
+| Column | Meaning |
+|---|---|
+| `Technology` | Misleadingly named: it holds **fuel** names, matched against `plants.csv`'s `Fuel` column. |
+| `Fuel Price ($/MWhTh)` | Price per **thermal** MWh. Divided by efficiency to reach an electrical cost. |
+
+#### `inputs/demand.csv` — one row per hour
+
+| Column | Meaning |
+|---|---|
+| `Hour` | The hour number. Must be ascending, contiguous and free of duplicates — `check_horizon` enforces this, because the ramp constraints link each row to the one above it. |
+| `Demand in region 1 (MWh)` | Demand to be served in that hour. |
+
+The horizon is however many rows this file has, currently 744. It does not wrap:
+the last hour is not followed by the first.
+
+#### `inputs/profiles.csv` — hourly availability factors
+
+This is the one input whose shape cannot be guessed, because it has **two header
+rows**:
+
+```
+,FRA,FRA
+hours,Wind,Solar
+1,0.6,0
+2,0.5,0
+```
+
+Row 1 is a region, row 2 is the series. `load_data` reads both with
+`header=[0, 1]` and flattens them into names of the form `FRA Wind`. Column
+matching then looks for the technology token (`wind`, `solar`) anywhere in the
+flattened name, so the region does not affect which column a plant is matched to.
+
+Values are **availability factors**: a share of nameplate between 0 and 1, one per
+profiled technology per hour. A technology with no matching column is not
+profiled, and the model prints a note rather than failing. The file must cover
+every hour in `demand.csv`.
+
+> The region row is a hook for multi-region support that never arrived, and
+> nothing consumes it. Whether it is removed is
+> [an open question](planning/onboarding_plan/11-profiles-region-header.md);
+> until it is settled, the two-row header above is what the parser requires.
+
+### Outputs
+
+#### `results/dispatch_results.csv`
 
 | Column | Claim |
 |---|---|
@@ -349,7 +431,7 @@ A column is a claim about meaning, so each one is listed with what it claims.
 | `Ramp Down (MWh)` | System total moved downward into this hour. Zero in hour 1. |
 | `Ramp Cost ($)` | **The premium alone**, not the total cost of the ramped energy. The fuel underneath a ramped MWh is already in `Production Cost`; including it here would double count. |
 | `Market Cost ($)` | `Clearing Price × Demand`. Negative in a spill hour. |
-| `Unserved Energy (MWh)` / `Unserved Cost ($)` | Demand not met, and it at VOLL. |
+| `Unserved Energy (MWh)` / `Unserved Cost ($)` | Demand not met, and it at LoL. |
 | `Spill (MWh)` / `Spill Cost ($)` | Energy generated and thrown away, and it at `SPILL_COST`. |
 | `Curtailment (MWh)` | Renewable resource available and not taken. Free and implicit. Not spill. |
 
@@ -357,7 +439,7 @@ Ramp quantities are **system totals, one pair of columns**, not per plant. The
 file already carries two columns per plant; adding two more each would make it
 unreadable. Per-plant ramp lives in the summary.
 
-### `results/plant_summary.csv`
+#### `results/plant_summary.csv`
 
 New columns: `Ramp Rate (MW/hr)`, `Ramping Efficiency (MWh/MWhTh)`,
 `Ramp Premium ($/MWh)`, `Total Ramp Up (MWh)`, `Total Ramp Down (MWh)`,
@@ -372,7 +454,7 @@ cost equals the clearing price, so the old column would have read zero for every
 plant in almost every hour. Counting who was last in the merit order is still
 useful; it is simply not the same thing as setting the price.
 
-### Ramp quantities come from the dispatch, not from the LP variables
+#### Ramp quantities come from the dispatch, not from the LP variables
 
 `ramp_up` and `ramp_down` are defined by *inequalities*
 (`gen[t] - gen[t-1] <= ramp_up[t]`), so the objective only pushes them down to the
@@ -384,7 +466,7 @@ Every reported ramp quantity is therefore **recomputed from the generation profi
 after solving**, never read from the variables. The variables exist only to carry
 cost into the objective.
 
-### The objective reconciliation
+#### The objective reconciliation
 
 `report()` prints all four components and their sum:
 
@@ -541,7 +623,7 @@ flagged for revisiting.
 | 3 | **−$1,000.00** | The model's first negative price. An extra MWh of demand in hour 3 would absorb a MWh that is currently being destroyed, saving the full spill cost. |
 
 The hour-3 price is the mirror image of a scarcity hour. Where scarcity prices at
-VOLL because the marginal unit is shed load, spill prices at `−SPILL_COST`
+LoL because the marginal unit is shed load, spill prices at `−SPILL_COST`
 because the marginal unit is destroyed energy.
 
 `Market Cost ($)` in hour 3 is `−$1,000 × 0 = $0`, but with any non-zero demand it

@@ -34,12 +34,24 @@ Premises, not steps on the route.
 - **Comparison defaults to the previous run** rather than starting empty.
 - **Comparison charts show the difference, not the overlay.** Two absolute series on
   one chart is the readability problem; B-minus-A is the fix, possibly with a toggle.
+  _Superseded by [The comparison view](dashboard_plan/02-comparison-view.md): the
+  premise held for the price chart, where three series on two axes was indeed the
+  problem, but not for generation. Absolutes and difference are now both always shown,
+  the absolutes as two side-by-side stacks on a shared axis rather than overlaid on
+  one chart, which was the unreadability the premise was really reacting to._
 
 ## Decisions so far
 
 <!-- one line per closed ticket -->
 
-_None yet._
+- **[The comparison view](dashboard_plan/02-comparison-view.md)** — show absolutes
+  *and* difference, always, and delete the toggle: two dispatch stacks side by side on
+  a shared y-axis, per-plant delta bars beneath, and the clearing price overlaid with
+  B-minus-A under it. Plants toggle once, through the shared checklist.
+- **[The rerun workflow](dashboard_plan/03-rerun-workflow.md)** (partial, still open) —
+  "previous" means the second-newest archived run, not the working folder, which is a
+  copy of the newest; the default is expressed in the layout at import time, not in
+  `refresh_run_lists`.
 
 ## Not yet specified
 

@@ -16,7 +16,7 @@ The sharp one: does **`Ramp Cost ($)`** mean the ramp premium alone, or the tota
 of the ramped energy including the fuel underneath it? Two different numbers. Under the
 adder formulation the premium is the marginal quantity, but a reader seeing "ramp cost"
 will likely assume the total. Whichever is chosen, the totals block in `report()`
-(`MFDM.py:704`) must still reconcile to the LP objective, and that reconciliation is
+must still reconcile to the LP objective, and that reconciliation is
 currently printed as a claim to the user.
 
 Settle, for `dispatch_results.csv`:
@@ -34,7 +34,7 @@ For `plant_summary.csv`:
 
 - Which ramp totals a per-plant summary should carry, and whether `Ramping Efficiency`
   is worth surfacing alongside the existing `Marginal Cost ($/MWh)`.
-- Whether a plant's `Production Cost ($)` (`MFDM.py:517`), currently
+- Whether a plant's `Production Cost ($)`, currently
   `total * marginal_cost`, now needs its ramp cost added — and whether that number
   still ties out against the results file.
 

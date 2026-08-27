@@ -2,21 +2,103 @@
 
 This repo provides the power market model and dashboard for the my first dispatch model onboarding.
 Its purpose is to create a python PuLP linear optimisation model which determines the cheapest way to dispatch a set of power plants to meet electricity demand over a set of time periods.
+It currently takes into account renewable intermittency and plant ramping constraints. 
 
-Run `model/MFDM.py` first, then `dashboard/dashboard.py`, which reads the CSVs in
-`results/`.
+## Quickstart
 
-- Vocabulary: [CONTEXT.md](CONTEXT.md)
-- What ramping means and why the prices changed: [docs/ramping_semantics.md](docs/ramping_semantics.md)
+Needs **python 3.8**. Install the dependencies, which are pinned in
+[requirements.txt](requirements.txt):
 
-It is made up of the following:
+```
+pip install -r requirements.txt
+```
 
-## Sets
+Then run the model, and then the dashboard:
+
+```
+python model/MFDM.py
+python dashboard/dashboard.py
+```
+
+The model writes CSVs into `results/`; the dashboard reads them. Ctrl-click the
+http://127.0.0.1:8050 link the dashboard prints. To rerun the model, close the
+dashboard first with Ctrl-C.
+
+## What is in the repo
+
+```
+requirements.txt        pinned dependencies, python 3.8
+inputs/                 plants.csv, fuel.csv, demand.csv, profiles.csv
+model/MFDM.py           the dispatch model, reads inputs/ and writes results/
+results/                dispatch_results.csv, plant_summary.csv
+dashboard/dashboard.py  Dash app for presenting and QA-ing results
+run_archive/            past runs, one timestamped folder each
+docs/                   the documents listed under Further reading
+```
+
+Every default run archives itself into a new folder under `run_archive/`, so that
+directory grows each time you run the model. `run_archive/runs.py` is the tool for
+working with it — `list`, `show`, `diff`, `restore`, `prune`.
+
+## Running with options
+
+```
+python model/MFDM.py --inputs <folder> --results <folder>
+```
+
+Reads the four input CSVs from somewhere other than `inputs/`, and writes results
+somewhere other than `results/`. This is how the worked examples in the semantics
+document are run.
+
+| Option | Effect |
+|---|---|
+| `--inputs <folder>` | Read the four input CSVs from `<folder>` instead of `inputs/` |
+| `--results <folder>` | Write result CSVs to `<folder>` instead of `results/` |
+| `--no-archive` | Solve and write results without archiving the run |
+| `--label <name>` | Short name for this run, used in the archive id |
+| `--notes <text>` | Longer description stored with the run |
+
+## Two constants you will meet in the output
+
+| Constant | Value | What it is |
+|---|---:|---|
+| `LoL` | $8,300/MWh | The cost of lost load — what unserved energy is priced at. Appears as $\text{LoL}$ in the objective below. |
+| `SPILL_COST` | $1,000/MWh | What energy that is generated and thrown away is charged. Appears as $\text{SPILL}$ below. |
+
+Both are set at the top of `model/MFDM.py`. Neither is a physical quantity.
+
+`LoL` must stay well above the marginal cost of the most expensive plant. If it
+drops below, the solver sheds load rather than running that plant, and nothing
+errors — the dispatch just quietly goes dark in expensive hours. The $8,300/MWh
+figure is the low end of the European Commission JRC estimate for Greece; see
+`docs/research/scarcity_pricing.md`.
+
+`docs/model_semantics.md` explains why `SPILL_COST` is $1,000/MWh and not `LoL`.
+
+## Troubleshooting
+
+| Symptom | Cause |
+|---|---|
+| `Could not find input file: ...` | Running from the wrong directory, or an `--inputs` folder missing one of the four CSVs. Run from the repo root. |
+| `WARNING: could not read git state` | `git` is not on PATH. The run still solves; pass `--no-archive` to skip archiving entirely. |
+| Dashboard shows stale numbers | The model was rerun while the dashboard was open. Close it with Ctrl-C and restart it. |
+| `Address already in use` on port 8050 | A previous dashboard is still running. Close it with Ctrl-C. |
+| A negative clearing price | Not a bug. It means energy was spilled in that hour; see the semantics document. |
+
+## Further reading
+
+- Vocabulary, one entry per term: [CONTEXT.md](CONTEXT.md)
+- What the model means — prices, the CSV contract, ramping, worked examples:
+  [docs/model_semantics.md](docs/model_semantics.md)
+
+## The model as maths
+
+### Sets
 - $P$ — power plants
 - $T$ — hours, ascending and contiguous. The horizon does not wrap.
 - Fuels
 
-## Parameters
+### Parameters
 - $A(p,t)$ — availability, how much plant $p$ can supply in hour $t$ (MWh). Nameplate for thermal plants; nameplate scaled by an hourly capacity factor for wind and solar.
 - $C(p)$ — marginal cost of 1 MWh from plant $p$ ($/MWh)
 - $\eta(p)$ — efficiency (MWh/MWhTh)
@@ -30,23 +112,23 @@ $$C(p) = \frac{\text{fuel price}(p)}{\eta(p)} + \text{VOM}(p)$$
 
 $$K(p) = \frac{\text{fuel price}(p)}{\eta_r(p)} - \frac{\text{fuel price}(p)}{\eta(p)}$$
 
-## Decision variables
+### Decision variables
 - $g(p,t) \geq 0$ — MWh generated by plant $p$ in hour $t$
 - $u(t) \geq 0$ — MWh of demand left unserved in hour $t$
 - $s(t) \geq 0$ — MWh generated in hour $t$ and thrown away
 - $V_{up}(p,t) \geq 0$ — upward movement by plant $p$ into hour $t$
 - $V_{dwn}(p,t) \geq 0$ — downward movement by plant $p$ into hour $t$
 
-## Objective function
+### Objective function
 Minimise the total cost of serving demand — production, ramping, lost load and spill.
 
-$$\min \sum_{p,t} C(p)\, g(p,t) \;+\; \sum_{t} \text{VOLL}\, u(t) \;+\; \sum_{t} \text{SPILL}\, s(t) \;+\; \sum_{p,t} K(p) \left( V_{up}(p,t) + V_{dwn}(p,t) \right)$$
+$$\min \sum_{p,t} C(p)\, g(p,t) \;+\; \sum_{t} \text{LoL}\, u(t) \;+\; \sum_{t} \text{SPILL}\, s(t) \;+\; \sum_{p,t} K(p) \left( V_{up}(p,t) + V_{dwn}(p,t) \right)$$
 
 Note this minimises **production cost**, not market cost. Minimising the clearing
 price times demand would be a different problem, and a wrong one: it would ignore
 the cost of ramping, lost load and spill.
 
-## Constraints
+### Constraints
 
 Energy balance, one per hour. Spill enters negatively because it is generation
 that did not serve demand:
@@ -69,7 +151,7 @@ Ramp rate limits, applied as upper bounds on the movement variables:
 
 $$0 \leq V_{up}(p,t) \leq R(p), \qquad 0 \leq V_{dwn}(p,t) \leq R(p)$$
 
-## Prices
+### Prices
 
 The hourly clearing price is the **dual of the energy balance** — what one more
 MWh of demand in that hour would cost the system.
@@ -84,5 +166,5 @@ offer in the stack, and in a spill hour it goes negative.
 The old merit-order calculation is still reported, as `Highest Running Cost`. It
 is a "who was last in the stack" diagnostic and not a price.
 
-See [docs/ramping_semantics.md](docs/ramping_semantics.md) for the full reasoning
+See [docs/model_semantics.md](docs/model_semantics.md) for the full reasoning
 and two worked three-hour examples.

@@ -64,7 +64,7 @@ def describe_git(manifest):
 def cmd_list(args):
     runs = runstore.list_runs()
     if not runs:
-        print("No runs archived yet. Run 'python MFDM.py' to create one.")
+        print("No runs archived yet. Run 'python model/MFDM.py' to create one.")
         return 0
 
     runs = runs[:args.limit] if args.limit else runs
@@ -269,7 +269,7 @@ def cmd_restore(args):
             outcome["safety_run"]))
     else:
         print("No safety snapshot was taken.")
-    print("\nRe-run the model to reproduce that run:  python MFDM.py")
+    print("\nRe-run the model to reproduce that run:  python model/MFDM.py")
     return 0
 
 

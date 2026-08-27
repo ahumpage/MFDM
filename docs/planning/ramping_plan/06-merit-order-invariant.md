@@ -8,11 +8,11 @@
 
 ## Question
 
-`check_merit_order` (`MFDM.py:555`) currently **raises** on violation, and `main`
-treats that as fatal (`MFDM.py:826`). Its invariant: no plant may generate strictly
+`warn_merit_order_departures` currently **raises** on violation, and `main`
+treats that as fatal. Its invariant: no plant may generate strictly
 below its dispatch ceiling while something strictly more expensive is generating.
 
-`dispatch_ceiling` (`MFDM.py:527`) was written in advance for this moment. Its
+`dispatch_ceiling` was written in advance for this moment. Its
 docstring names the replacement — `np.minimum(par["avail"], previous_output +
 ramp_up_rate)` — and already warns that a ramp-*down* limit is different in kind,
 because it puts a floor under a plant rather than a ceiling over it, and a floor can
@@ -34,17 +34,17 @@ Settle:
 - Whether any invariant survives that is strong enough to still be worth raising on.
   A warning nobody can act on is noise; if the honest answer is that no cheap check
   can distinguish a bug from a paid ramp, the spec should say so.
-- Whether the diagnostic's "cost of the violation" figure (`MFDM.py:613`) still means
+- Whether the diagnostic's "cost of the violation" figure still means
   anything, since some of that cost is now legitimately spent avoiding ramp charges.
 - What the run does on warning. Today a failure still writes the CSVs first
-  (`MFDM.py:822`) so the dispatch can be inspected, and blocks archiving so a known-bad
+  so the dispatch can be inspected, and blocks archiving so a known-bad
   run never enters the archive. If it is only a warning, does the run still archive?
 - Record **why** a correctness gate was given up. This is the question a future reader
   will ask, and it is the reason this is a ticket rather than a premise.
 
 ## Decision
 
-**Demoted from error to warning, as agreed.** `check_merit_order` prints a note and
+**Demoted from error to warning, as agreed.** `warn_merit_order_departures` prints a note and
 returns; the run continues, reports, and archives normally.
 
 **The ceiling gains a ramp term and the check gains a matching floor:**
@@ -82,7 +82,7 @@ is not a known-bad run, and refusing to archive 195 hours of correct results wou
 make the archive useless exactly when ramping is being studied.
 
 **Why a correctness gate was given up.** Recorded at length in the
-`check_merit_order` docstring as well as here, because it is the question a future
+`warn_merit_order_departures` docstring as well as here, because it is the question a future
 reader will ask. In short: the invariant was never about merit order as such, it
 was a proxy for "the LP found the cheapest dispatch". That proxy was exact while
 hours were independent and is simply false once they are coupled. Keeping it would
