@@ -96,8 +96,11 @@ once regardless of how much energy flowed. Always reported beside the
 load-weighted figure and never instead of it: cheap hours are usually quiet hours,
 so it understates what demand cost.
 
-**Producer surplus** — `market cost - production cost`, across the fleet. What
-generators collectively earn above what it cost them to generate.
+**Market surplus** — `market cost - production cost`, across the system. Includes
+the cost of unserved demand, so it is not generator revenue in a scarcity hour.
+
+**Average production cost** — production cost per MWh generated, including energy
+that was later spilled.
 
 **Inframarginal rent** — the same idea for one plant: what it earns at the
 clearing price above its own marginal cost. A plant earns rent in every hour the
@@ -111,6 +114,8 @@ Four distinct concepts that are easy to conflate. Two are about too little energ
 two about too much.
 
 **Unserved energy** — demand the fleet could not meet. Priced at LoL. Too little.
+
+**Energy served** — demand delivered to consumers: `demand - unserved energy`.
 
 **Scarcity hour** — an hour with unserved energy. Prices at LoL, because the
 marginal unit is shed load.

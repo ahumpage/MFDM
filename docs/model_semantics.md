@@ -465,6 +465,13 @@ every hour in `demand.csv`.
 | `Spill (MWh)` / `Spill Cost ($)` | Energy generated and thrown away, and it at `SPILL_COST`. |
 | `Curtailment (MWh)` | Renewable resource available and not taken. Free and implicit. Not spill. |
 
+Headline KPIs keep demand and delivered energy distinct. `Energy served` is demand
+minus unserved energy. `Market Cost` remains clearing price times total demand, so
+the load-weighted price is market cost divided by total demand. `Average production
+cost` is production cost divided by total generation, including spilled energy.
+`Market surplus` is market cost minus production cost; it includes the cost of
+unserved demand and is not generator revenue in a scarcity hour.
+
 Ramp quantities are **system totals, one pair of columns**, not per plant. The
 file already carries two columns per plant; adding two more each would make it
 unreadable. Per-plant ramp lives in the summary.

@@ -847,6 +847,8 @@ def build_kpis(run, hourly):
     demand = hourly[DEMAND_COL].sum()
     prod = hourly[PROD_COST_COL].sum()
     market = hourly[MARKET_COST_COL].sum()
+    unserved = hourly[UNSERVED_COL].sum() if UNSERVED_COL in hourly.columns else 0.0
+    generated = sum(hourly[run.meta[p]["column"]].sum() for p in run.plant_order)
 
     # Production cost is fuel and VOM only, so the ramp and spill components
     # are shown beside it rather than left missing from the reader's sum.
@@ -861,7 +863,8 @@ def build_kpis(run, hourly):
         kpi_card("Hours", "{:,}".format(len(hourly)),
                  "hour {:,} to {:,}".format(int(hourly["Hour"].min()),
                                             int(hourly["Hour"].max()))),
-        kpi_card("Energy served", "{:,.0f} MWh".format(demand)),
+        kpi_card("Energy served", "{:,.0f} MWh".format(demand - unserved)),
+        kpi_card("Unserved energy", "{:,.0f} MWh".format(unserved)),
         kpi_card("Production cost", "${:,.0f}".format(prod), "fuel and VOM"),
     ]
     if run.has_ramp:
@@ -873,9 +876,9 @@ def build_kpis(run, hourly):
             "the LP objective"))
     cards += [
         kpi_card("Market cost", "${:,.0f}".format(market), "price x demand"),
-        kpi_card("Avg production cost", "${:,.2f}/MWh".format(prod / demand if demand else 0)),
+        kpi_card("Avg production cost", "${:,.2f}/MWh".format(prod / generated if generated else 0)),
         kpi_card("Load-weighted price", "${:,.2f}/MWh".format(market / demand if demand else 0)),
-        kpi_card("Producer surplus", "${:,.0f}".format(market - prod), "market - production"),
+        kpi_card("Market surplus", "${:,.0f}".format(market - prod), "market - production"),
     ]
     if run.has_spill and total(SPILL_COL) > QA_TOL:
         cards.append(kpi_card("Spilled", "{:,.0f} MWh".format(total(SPILL_COL)),
@@ -1147,10 +1150,12 @@ C_RUN_B = "#D55E00"
 COMPARE_KPIS = [
     ("production_cost", "Production cost", "$", "lower"),
     ("market_cost", "Market cost", "$", "lower"),
+    ("market_surplus", "Market surplus", "$", None),
     ("load_weighted_price", "Load-weighted price", "$/MWh", "lower"),
     ("renewable_share_pct", "Renewable share", "%", "higher"),
     ("curtailed_mwh", "Curtailed", "MWh", "lower"),
     ("energy_served_mwh", "Energy served", "MWh", None),
+    ("unserved_mwh", "Unserved energy", "MWh", "lower"),
 ]
 
 
@@ -1161,6 +1166,7 @@ def window_kpis(run, lo, hi):
     demand = float(h[DEMAND_COL].sum())
     prod = float(h[PROD_COST_COL].sum())
     market = float(h[MARKET_COST_COL].sum())
+    unserved = float(h[UNSERVED_COL].sum()) if UNSERVED_COL in h.columns else 0.0
     ren_used = sum(float(h[run.meta[p]["column"]].sum())
                    for p in run.plant_order if run.meta[p]["profiled"])
     curtailed = float(h["Curtailment (MWh)"].sum()) \
@@ -1173,10 +1179,12 @@ def window_kpis(run, lo, hi):
     return {
         "production_cost": prod,
         "market_cost": market,
+        "market_surplus": market - prod,
         "load_weighted_price": market / demand if demand else 0.0,
         "renewable_share_pct": 100.0 * ren_used / demand if demand else 0.0,
         "curtailed_mwh": curtailed,
-        "energy_served_mwh": demand,
+        "energy_served_mwh": demand - unserved,
+        "unserved_mwh": unserved,
         "renewable_available_mwh": ren_avail,
     }
 

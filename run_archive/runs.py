@@ -28,8 +28,9 @@ KPI_DISPLAY = [
     ("avg_production_cost", "Avg production cost", "$/MWh", "lower"),
     ("load_weighted_price", "Load-weighted price", "$/MWh", "lower"),
     ("time_weighted_price", "Time-weighted price", "$/MWh", "lower"),
-    ("producer_surplus", "Producer surplus", "$", None),
+    ("market_surplus", "Market surplus", "$", None),
     ("energy_served_mwh", "Energy served", "MWh", None),
+    ("unserved_mwh", "Unserved energy", "MWh", "lower"),
     ("renewable_used_mwh", "Renewable used", "MWh", "higher"),
     ("renewable_share_pct", "Renewable share", "%", "higher"),
     ("curtailed_mwh", "Curtailed", "MWh", "lower"),
@@ -124,8 +125,9 @@ def cmd_show(args):
 
     print("\n  results")
     for key, label, unit, _ in KPI_DISPLAY:
-        if key in k:
-            print("    {:<22} {:>16}".format(label, fmt(k[key], unit)))
+        value = runstore.kpi_value(k, key)
+        if value is not None:
+            print("    {:<22} {:>16}".format(label, fmt(value, unit)))
 
     print("\n  plants")
     print("    {:<10} {:<8} {:>9} {:>9} {:>14} {:>8} {:>10}".format(

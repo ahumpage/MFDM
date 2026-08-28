@@ -1,7 +1,7 @@
 # What does "energy served" mean, and what divides the load-weighted price?
 
 - **Type**: `wayfinder:grilling` (HITL)
-- **Status**: open
+- **Status**: resolved
 - **Assignee**: unclaimed
 - **Blocked by**: —
 - **Part of**: [Map: Onboarding, documentation and AI readiness](../onboarding_plan.md)
@@ -59,3 +59,26 @@ decide where they live and [What happens to the 22 manifests already
 written?](07-manifest-compatibility.md) can decide what it costs.
 
 ## Decision
+
+**Energy served is delivered energy:** `demand - unserved energy`. The label is
+kept, and `unserved_mwh` becomes a headline KPI in manifests, single-run dashboard
+cards and comparison cards. Results written before the unserved-energy column read
+as zero unserved energy.
+
+**Market Cost remains `clearing price x demand`.** In a scarcity hour it includes
+the LoL cost of unmet demand. Therefore `load_weighted_price = market_cost / demand`;
+changing only its denominator would produce a number with no defined numerator.
+
+**Average production cost is production-weighted:**
+`production_cost / total_generation`. Generated energy includes spill because it
+incurred production cost. It is zero where no energy was generated.
+
+**`Producer surplus` is retired in favour of `Market surplus`:**
+`market_cost - production_cost`. The former name falsely implies generator earnings
+when market cost includes the cost assigned to unserved demand. The new name is a
+system-level market-minus-production measure.
+
+New manifests write `market_surplus`. Readers accept the old `producer_surplus`
+key as its predecessor so existing manifests keep displaying and diffing. Whether
+to rewrite or version existing manifests remains the compatibility decision in
+[What happens to the 22 manifests already written?](07-manifest-compatibility.md).

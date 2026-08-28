@@ -185,6 +185,8 @@ def compute_kpis(results, summary):
     demand = float(results["Demand (MWh)"].sum())
     prod = float(results["Production Cost ($)"].sum())
     market = float(results["Market Cost ($)"].sum())
+    unserved = float(results["Unserved Energy (MWh)"].sum()) \
+        if "Unserved Energy (MWh)" in results.columns else 0.0
 
     gen_total = float(summary["Total Generation (MWh)"].sum())
 
@@ -197,14 +199,15 @@ def compute_kpis(results, summary):
 
     kpis = {
         "hours": int(len(results)),
-        "energy_served_mwh": demand,
+        "energy_served_mwh": demand - unserved,
+        "unserved_mwh": unserved,
         "energy_generated_mwh": gen_total,
         "production_cost": prod,
         "market_cost": market,
-        "avg_production_cost": prod / demand if demand else 0.0,
+        "avg_production_cost": prod / gen_total if gen_total else 0.0,
         "time_weighted_price": float(results["Clearing Price ($/MWh)"].mean()),
         "load_weighted_price": market / demand if demand else 0.0,
-        "producer_surplus": market - prod,
+        "market_surplus": market - prod,
         "renewable_used_mwh": ren_used,
         "renewable_available_mwh": ren_avail,
         "renewable_share_pct": 100.0 * ren_used / demand if demand else 0.0,
@@ -233,6 +236,15 @@ def compute_kpis(results, summary):
             "hours_setting_price": int(last_in_stack),
         })
     return kpis
+
+
+def kpi_value(kpis, key):
+    """Read a KPI, including defaults for result files archived before it existed."""
+    if key == "unserved_mwh":
+        return kpis.get(key, 0.0)
+    if key == "market_surplus":
+        return kpis.get(key, kpis.get("producer_surplus"))
+    return kpis.get(key)
 
 
 # --------------------------------------------------------------------------
@@ -675,10 +687,14 @@ def diff(run_ref_a, run_ref_b):
 
     # --- results ---
     ka, kb = ma["kpis"], mb["kpis"]
-    scalar_keys = [k for k in ka if k != "plants"]
+    scalar_keys = (set(ka) | set(kb)) - {"plants", "producer_surplus"}
+    if "market_surplus" in ka or "market_surplus" in kb \
+            or "producer_surplus" in ka or "producer_surplus" in kb:
+        scalar_keys.add("market_surplus")
+    scalar_keys = sorted(scalar_keys)
     kpi_delta = []
     for k in scalar_keys:
-        va, vb = ka.get(k), kb.get(k)
+        va, vb = kpi_value(ka, k), kpi_value(kb, k)
         if not isinstance(va, (int, float)) or not isinstance(vb, (int, float)):
             continue
         delta = vb - va

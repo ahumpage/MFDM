@@ -778,14 +778,15 @@ def report(params, results, summary, objective_value=None):
             print("  {:<26} {:>16} {:<6} (reconciles with the solver)"
                   .format("", "", ""))
     print("")
-    print("  Average production cost    {:>16,.2f} $/MWh".format(prod_cost / total_demand))
+    print("  Average production cost    {:>16,.2f} $/MWh".format(
+        prod_cost / total_gen if total_gen else 0.0))
     print("  Total market cost          {:>16,.2f} $      (clearing price x demand)"
           .format(market_cost))
     print("  Time-weighted avg price    {:>16,.2f} $/MWh"
           .format(results["Clearing Price ($/MWh)"].mean()))
     print("  Load-weighted avg price    {:>16,.2f} $/MWh".format(market_cost / total_demand))
-    print("  Producer surplus           {:>16,.2f} $      (market - production)"
-          .format(market_cost - prod_cost))
+    print("  Market surplus             {:>16,.2f} $      (market - production)"
+           .format(market_cost - prod_cost))
     if (results["Clearing Price ($/MWh)"] < -TOL).any():
         print("  note: the clearing price is negative in {} hour(s), so market cost "
               "there is\n        money paid to consumers to take power. See SPILL below."

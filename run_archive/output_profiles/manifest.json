@@ -1,24 +1,24 @@
 {
   "id": "output_profiles",
-  "created": "2026-08-27T14:34:50",
+  "created": "2026-08-28T11:13:38",
   "label": "output_profiles",
   "notes": null,
   "git": {
-    "commit": "7b2a90658be03034b4a7203dfc29dcd3f90cb8ec",
-    "short": "7b2a906",
-    "branch": "thurschanges",
+    "commit": "dc0c8a9d7df4513cc77478b6e122149046d51251",
+    "short": "dc0c8a9",
+    "branch": "fri_battery",
     "dirty": true
   },
   "code": {
-    "MFDM.py": "113aa324e08a193a",
-    "dashboard.py": "286fe67de05f8546",
+    "MFDM.py": "0940efeb7cdf6e07",
+    "dashboard.py": "4c52a89cd89a839d",
     "runstore.py": "01b4109c7bef4de6",
     "runs.py": "2d347ff09c2020ad"
   },
   "inputs": {
     "plants.csv": {
-      "hash": "fa01bd5ee74c3a53",
-      "size": 267,
+      "hash": "758963ac456be4e3",
+      "size": 269,
       "source": "plants_basic.csv"
     },
     "fuel.csv": {
@@ -36,35 +36,35 @@
     }
   },
   "outputs": {
-    "dispatch_results.csv": "b42d1e48802de3ee",
-    "plant_summary.csv": "f60a1c727b9b8d37"
+    "dispatch_results.csv": "d1d2fa67a4281990",
+    "plant_summary.csv": "cb3412f99b0ee249"
   },
   "solver": {
     "status": "Optimal",
-    "seconds": 0.381
+    "seconds": 0.402
   },
   "kpis": {
     "hours": 744,
     "energy_served_mwh": 461279.447689,
-    "energy_generated_mwh": 461279.44759999996,
-    "production_cost": 12340621.684757,
-    "market_cost": 23424336.688511,
-    "avg_production_cost": 26.75302736027639,
-    "time_weighted_price": 50.68010752688172,
-    "load_weighted_price": 50.781227747879115,
-    "producer_surplus": 11083715.003754,
-    "renewable_used_mwh": 174465.02338,
-    "renewable_available_mwh": 174530.0,
-    "renewable_share_pct": 37.82198063539704,
-    "curtailed_mwh": 64.97662,
-    "curtailment_pct": 0.037229484902309054,
+    "energy_generated_mwh": 461279.447645,
+    "production_cost": 8388725.623138,
+    "market_cost": 18680345.625203002,
+    "avg_production_cost": 18.18577798158,
+    "time_weighted_price": 40.351881720430114,
+    "load_weighted_price": 40.496808862374266,
+    "producer_surplus": 10291620.002065003,
+    "renewable_used_mwh": 229050.83908,
+    "renewable_available_mwh": 229400.0,
+    "renewable_share_pct": 49.6555483292264,
+    "curtailed_mwh": 349.16092,
+    "curtailment_pct": 0.15220615518744549,
     "plants": [
       {
         "plant": "Plant 1",
         "technology": "Solar",
         "capacity_mw": 500.0,
         "profiled": true,
-        "marginal_cost": 1.0,
+        "marginal_cost": 0.5,
         "generation_mwh": 92225.0,
         "capacity_factor_pct": 24.791667,
         "hours_running": 403,
@@ -73,35 +73,35 @@
       {
         "plant": "Plant 2",
         "technology": "Wind",
-        "capacity_mw": 300.0,
+        "capacity_mw": 500.0,
         "profiled": true,
-        "marginal_cost": 2.0,
-        "generation_mwh": 82240.02338,
-        "capacity_factor_pct": 36.845889,
+        "marginal_cost": 1.0,
+        "generation_mwh": 136825.83908,
+        "capacity_factor_pct": 36.78114,
         "hours_running": 744,
-        "hours_setting_price": 2
+        "hours_setting_price": 10
       },
       {
         "plant": "Plant 3",
         "technology": "Coal",
         "capacity_mw": 100.0,
         "profiled": false,
-        "marginal_cost": 15.0,
-        "generation_mwh": 73617.15642,
-        "capacity_factor_pct": 98.947791,
-        "hours_running": 742,
-        "hours_setting_price": 14
+        "marginal_cost": 21.5,
+        "generation_mwh": 72384.220509,
+        "capacity_factor_pct": 97.290619,
+        "hours_running": 734,
+        "hours_setting_price": 26
       },
       {
         "plant": "Plant 4",
         "technology": "Gas",
         "capacity_mw": 600.0,
         "profiled": false,
-        "marginal_cost": 51.5,
-        "generation_mwh": 213197.2678,
-        "capacity_factor_pct": 47.759245,
-        "hours_running": 728,
-        "hours_setting_price": 728
+        "marginal_cost": 41.6,
+        "generation_mwh": 159844.388056,
+        "capacity_factor_pct": 35.807435,
+        "hours_running": 708,
+        "hours_setting_price": 708
       },
       {
         "plant": "Plant 5",
