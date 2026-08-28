@@ -179,6 +179,8 @@ def cmd_diff(args):
                 for c in info["changes"]:
                     print("    {:<12} {:<26} {} -> {}".format(
                         c["row"], c["field"], c["before"], c["after"]))
+            elif info["kind"] == "presence":
+                print("    {} -> {}".format(info["before"], info["after"]))
             else:
                 before, after = info["before"], info["after"]
                 print("    rows: {:,} -> {:,}".format(before["rows"], after["rows"]))
@@ -255,8 +257,10 @@ def cmd_restore(args):
     print("About to restore inputs from run {} ({}).".format(
         run_id, m.get("label") or "no label"))
     print("This overwrites the following in the working folder:")
-    for name in runstore.INPUT_FILES:
+    for name in targets:
         print("  {}".format(targets[name].name))
+    if "battery.csv" not in targets and runstore.live_path("battery.csv").exists():
+        print("  battery.csv (removed: absent from this run)")
 
     if not args.yes:
         answer = input("Continue? Current inputs are snapshotted first. [y/N] ")

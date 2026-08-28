@@ -1,2 +1,2 @@
-Battery,Power MWh,Capacity MW,efficiency (MWh/MWhEl)
-Batt1,50,200,0.9
+Battery,Power (MW),Capacity (MWh),Efficiency (MWh/MWhEl)
+Batt1,100,200,0.9

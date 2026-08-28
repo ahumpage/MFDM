@@ -20,8 +20,8 @@ REPO_ROOT = BASE_DIR.parent
 INPUTS_DIR = REPO_ROOT / "inputs"
 RESULTS_DIR = REPO_ROOT / "results"
 
-# The four inputs the model reads. Each is a *role* - plants, fuel, demand,
-# profiles - and the file filling it is chosen per run with the matching
+# The five inputs the model reads. Each is a *role* - plants, fuel, demand,
+# profiles, batteries - and the file filling it is chosen per run with the matching
 # command line flag, so inputs/ can hold alternatives side by side. The
 # defaults are the simple case: no ramp limits and no renewable profiles.
 DEFAULT_INPUT_NAMES = {
@@ -29,12 +29,14 @@ DEFAULT_INPUT_NAMES = {
     "fuel": "fuel.csv",
     "demand": "demand.csv",
     "profiles": "profiles_basic.csv",
+    "battery": "battery.csv",
 }
 
 PLANTS_FILE = INPUTS_DIR / DEFAULT_INPUT_NAMES["plants"]
 FUEL_FILE = INPUTS_DIR / DEFAULT_INPUT_NAMES["fuel"]
 DEMAND_FILE = INPUTS_DIR / DEFAULT_INPUT_NAMES["demand"]
 PROFILE_FILE = INPUTS_DIR / DEFAULT_INPUT_NAMES["profiles"]
+BATTERY_FILE = INPUTS_DIR / DEFAULT_INPUT_NAMES["battery"]
 
 # Generation below this counts as "not running", so solver round-off cannot
 # set the price.
@@ -107,17 +109,44 @@ def load_data():
         plants[col] = plants[col].astype(str).str.strip()
     fuel["Technology"] = fuel["Technology"].astype(str).str.strip()
 
-    return plants, fuel, demand, profile
+    battery = (pd.read_csv(BATTERY_FILE, keep_default_na=False)
+               if BATTERY_FILE is not None and BATTERY_FILE.exists() else pd.DataFrame(
+                   columns=["Battery", "Power (MW)", "Capacity (MWh)",
+                            "Efficiency (MWh/MWhEl)"]))
+    for df in (plants, fuel, demand, profile, battery):
+        df.columns = [c.strip() for c in df.columns]
+    if not battery.empty:
+        battery["Battery"] = battery["Battery"].astype(str).str.strip()
+
+    return plants, fuel, demand, profile, battery
 
 
 # Parameters
 
-def build_parameters(plants, fuel, demand, profile):
+def build_parameters(plants, fuel, demand, profile, battery):
 
     # --- sets ---
     PLANTS = list(plants["Plant"])
+    BATTERIES = list(battery["Battery"])
     HOURS = [int(h) for h in demand["Hour"]]
     check_horizon(HOURS)
+    if len(set(BATTERIES)) != len(BATTERIES) or any(not b for b in BATTERIES):
+        raise ValueError("battery.csv battery names must be non-blank and unique")
+    if set(BATTERIES) & set(PLANTS):
+        raise ValueError("battery.csv names must not match plant names")
+
+    battery_power = {}
+    battery_capacity = {}
+    battery_efficiency = {}
+    for _, row in battery.iterrows():
+        b = row["Battery"]
+        battery_power[b] = float(row[find_column(battery, "Power", "battery.csv")])
+        battery_capacity[b] = float(row[find_column(battery, "Capacity", "battery.csv")])
+        battery_efficiency[b] = float(row[find_column(battery, "efficiency", "battery.csv")])
+        if battery_power[b] <= 0 or battery_capacity[b] <= 0:
+            raise ValueError("Battery {} has non-positive power or capacity".format(b))
+        if not 0 < battery_efficiency[b] <= 1:
+            raise ValueError("Battery {} has efficiency outside 0 to 1".format(b))
 
     # --- fuel prices, anything unlisted is free ---
     fuel_price = dict(zip(fuel["Technology"], fuel["Fuel Price ($/MWhTh)"].astype(float)))
@@ -219,6 +248,7 @@ def build_parameters(plants, fuel, demand, profile):
 
     return {
         "PLANTS": PLANTS,
+        "BATTERIES": BATTERIES,
         "HOURS": HOURS,
         "capacity": capacity,
         "efficiency": efficiency,
@@ -232,6 +262,9 @@ def build_parameters(plants, fuel, demand, profile):
         "availability": availability,
         "profiled": set(profile_factors),
         "demand": demand_by_hour,
+        "battery_power": battery_power,
+        "battery_capacity": battery_capacity,
+        "battery_efficiency": battery_efficiency,
         "avail": avail,
         "cap_vec": cap_vec,
         "mc_vec": mc_vec,
@@ -356,7 +389,7 @@ def warn_capacity_shortfall(params):
 
 def build_and_solve(params):
 
-    PLANTS, HOURS = params["PLANTS"], params["HOURS"]
+    PLANTS, BATTERIES, HOURS = params["PLANTS"], params["BATTERIES"], params["HOURS"]
 
     # Hour 1 has no predecessor, so it carries no ramp constraint and the
     # fleet starts wherever it likes free of charge.
@@ -368,6 +401,11 @@ def build_and_solve(params):
     gen = pulp.LpVariable.dicts("gen", (PLANTS, HOURS), lowBound=0, cat="Continuous")
     unserved = pulp.LpVariable.dicts("unserved", HOURS, lowBound=0, cat="Continuous")
     spill = pulp.LpVariable.dicts("spill", HOURS, lowBound=0, cat="Continuous")
+    charge = pulp.LpVariable.dicts("charge", (BATTERIES, HOURS), lowBound=0, cat="Continuous")
+    discharge = pulp.LpVariable.dicts("discharge", (BATTERIES, HOURS), lowBound=0, cat="Continuous")
+    soc = {b: {t: pulp.LpVariable("soc_{}_{}".format(b.replace(" ", "_"), t),
+                                lowBound=0, upBound=params["battery_capacity"][b])
+               for t in HOURS} for b in BATTERIES}
 
     # Movement split into two non-negative variables so its absolute size can
     # be priced linearly. The upper bound is the hard rate limit, which is why
@@ -392,8 +430,10 @@ def build_and_solve(params):
     # enters negatively: it is generation that did not serve demand.
     for t in HOURS:
         prob += (
-            pulp.lpSum(gen[p][t] for p in PLANTS) + unserved[t] - spill[t]
-            == params["demand"][t],
+            (pulp.lpSum(gen[p][t] for p in PLANTS)
+             + pulp.lpSum(discharge[b][t] for b in BATTERIES)
+             + unserved[t] - spill[t]
+             == params["demand"][t] + pulp.lpSum(charge[b][t] for b in BATTERIES)),
             "balance_{}".format(t),
         )
 
@@ -403,6 +443,16 @@ def build_and_solve(params):
                 gen[p][t] <= params["availability"][p][t],
                 "cap_{}_{}".format(p.replace(" ", "_"), t),
             )
+
+    for b in BATTERIES:
+        for i, t in enumerate(HOURS):
+            prev = HOURS[i - 1]
+            prob += (soc[b][t] - soc[b][prev]
+                     == params["battery_efficiency"][b] * charge[b][t]
+                     - discharge[b][t] * (1.0 / params["battery_efficiency"][b]),
+                     "soc_{}_{}".format(b.replace(" ", "_"), t))
+            prob += (charge[b][t] + discharge[b][t] <= params["battery_power"][b],
+                     "battery_power_{}_{}".format(b.replace(" ", "_"), t))
 
     # Inequalities, so ramp_up and ramp_down are only pushed down to the true
     # movement by their cost. A plant with a zero premium leaves them free
@@ -421,7 +471,8 @@ def build_and_solve(params):
             )
 
     n_vars = (len(PLANTS) * len(HOURS)          # gen
-              + 2 * len(HOURS)                   # unserved, spill
+               + 2 * len(HOURS)                   # unserved, spill
+               + 3 * len(BATTERIES) * len(HOURS)  # charge, discharge, SoC
               + 2 * len(PLANTS) * len(RAMP_HOURS))  # ramp up and down
     print("Solving: {} variables, {} constraints ...".format(
         n_vars, len(prob.constraints)))
@@ -440,12 +491,12 @@ def build_and_solve(params):
         )
     print("Solver status: {}\n".format(status))
 
-    return prob, gen, unserved, spill
+    return prob, gen, unserved, spill, charge, discharge, soc
 
 
 # Results
 
-def build_hourly_results(params, prob, gen, unserved, spill):
+def build_hourly_results(params, prob, gen, unserved, spill, charge, discharge, soc):
 
     PLANTS, HOURS = params["PLANTS"], params["HOURS"]
     avail, mc_vec, demand_vec = params["avail"], params["mc_vec"], params["demand_vec"]
@@ -496,6 +547,10 @@ def build_hourly_results(params, prob, gen, unserved, spill):
         columns["{} (MWh)".format(p)] = output[i]
     for i, p in enumerate(PLANTS):
         columns["{} Available (MWh)".format(p)] = avail[i]
+    for b in params["BATTERIES"]:
+        columns["{} Charge (MWh)".format(b)] = [charge[b][t].value() or 0.0 for t in HOURS]
+        columns["{} Discharge (MWh)".format(b)] = [discharge[b][t].value() or 0.0 for t in HOURS]
+        columns["{} State of Charge (MWh)".format(b)] = [soc[b][t].value() or 0.0 for t in HOURS]
     columns["Clearing Price ($/MWh)"] = price
     columns["Highest Running Cost ($/MWh)"] = highest_running
     columns["Production Cost ($)"] = mc_vec @ output
@@ -804,8 +859,13 @@ def report(params, results, summary, objective_value=None):
 
     # Unserved energy and spill are both part of the balance, so they are
     # counted here too.
-    gap = abs(total_gen + total_unserved - total_spill - total_demand)
-    print("\n  Energy balance check: |generation + unserved - spill - demand| = "
+    total_charge = sum(results["{} Charge (MWh)".format(b)].sum()
+                       for b in params["BATTERIES"])
+    total_discharge = sum(results["{} Discharge (MWh)".format(b)].sum()
+                          for b in params["BATTERIES"])
+    gap = abs(total_gen + total_discharge + total_unserved - total_spill
+              - total_demand - total_charge)
+    print("\n  Energy balance check: |generation + discharge + unserved - spill - demand - charge| = "
           "{:.6f} MWh {}".format(gap, "OK" if gap < 1e-3 else "<-- PROBLEM"))
 
     if total_unserved > TOL:
@@ -870,6 +930,8 @@ def parse_args(argv=None):
                         help="longer description stored with the run")
     parser.add_argument("--no-archive", action="store_true",
                         help="solve and write results without archiving the run")
+    parser.add_argument("--no-battery", action="store_true",
+                        help="solve without battery storage")
     parser.add_argument("--inputs", default=None,
                         help="read the four input CSVs from here instead of inputs/. "
                              "Useful for running the worked examples in "
@@ -886,7 +948,7 @@ def parse_args(argv=None):
 
 def use_directories(inputs=None, results=None):
     """Point the model at a different pair of input and output folders."""
-    global INPUTS_DIR, RESULTS_DIR, PLANTS_FILE, FUEL_FILE, DEMAND_FILE, PROFILE_FILE
+    global INPUTS_DIR, RESULTS_DIR, PLANTS_FILE, FUEL_FILE, DEMAND_FILE, PROFILE_FILE, BATTERY_FILE
     if inputs is not None:
         INPUTS_DIR = Path(inputs).resolve()
         # A whole folder of inputs is expected to use the plain role names,
@@ -896,6 +958,7 @@ def use_directories(inputs=None, results=None):
         FUEL_FILE = INPUTS_DIR / "fuel.csv"
         DEMAND_FILE = INPUTS_DIR / "demand.csv"
         PROFILE_FILE = INPUTS_DIR / "profiles.csv"
+        BATTERY_FILE = INPUTS_DIR / "battery.csv"
     if results is not None:
         RESULTS_DIR = Path(results).resolve()
 
@@ -914,9 +977,9 @@ def resolve_input(name):
     return path.resolve()
 
 
-def use_files(plants=None, fuel=None, demand=None, profiles=None):
+def use_files(plants=None, fuel=None, demand=None, profiles=None, battery=None):
     """Choose the file filling each input role, leaving the others alone."""
-    global PLANTS_FILE, FUEL_FILE, DEMAND_FILE, PROFILE_FILE
+    global PLANTS_FILE, FUEL_FILE, DEMAND_FILE, PROFILE_FILE, BATTERY_FILE
     if plants is not None:
         PLANTS_FILE = resolve_input(plants)
     if fuel is not None:
@@ -925,6 +988,8 @@ def use_files(plants=None, fuel=None, demand=None, profiles=None):
         DEMAND_FILE = resolve_input(demand)
     if profiles is not None:
         PROFILE_FILE = resolve_input(profiles)
+    if battery is not None:
+        BATTERY_FILE = resolve_input(battery)
 
 
 def input_paths():
@@ -934,18 +999,24 @@ def input_paths():
     run using plants_ramping.csv stays directly comparable with one using
     plants_basic.csv. The real name travels alongside as the entry's "source".
     """
-    return {
+    paths = {
         "plants.csv": PLANTS_FILE,
         "fuel.csv": FUEL_FILE,
         "demand.csv": DEMAND_FILE,
         "profiles.csv": PROFILE_FILE,
     }
+    if BATTERY_FILE is not None and BATTERY_FILE.exists():
+        paths["battery.csv"] = BATTERY_FILE
+    return paths
 
 
 def main(argv=None):
     args = parse_args(argv)
     use_directories(args.inputs, args.results)
-    use_files(args.plants, args.fuel, args.demand, args.profiles)
+    use_files(args.plants, args.fuel, args.demand, args.profiles, args.battery)
+    if args.no_battery:
+        global BATTERY_FILE
+        BATTERY_FILE = None
 
     print("\n" + "=" * 68)
     print("MY FIRST DISPATCH MODEL")
@@ -956,11 +1027,11 @@ def main(argv=None):
         print("  {:<10} {}".format(role[:-len(".csv")], path.name))
     print("")
 
-    plants, fuel, demand, profile = load_data()
-    print("Loaded {} plants, {} fuels, {} hours, {} profile rows.\n"
-          .format(len(plants), len(fuel), len(demand), len(profile)))
+    plants, fuel, demand, profile, battery = load_data()
+    print("Loaded {} plants, {} batteries, {} fuels, {} hours, {} profile rows.\n"
+          .format(len(plants), len(battery), len(fuel), len(demand), len(profile)))
 
-    params = build_parameters(plants, fuel, demand, profile)
+    params = build_parameters(plants, fuel, demand, profile, battery)
     if params["profiled"]:
         print("  profiled technologies: {}\n".format(
             ", ".join("{} ({})".format(p, params["technology"][p])
@@ -969,10 +1040,10 @@ def main(argv=None):
     warn_capacity_shortfall(params)
 
     started = time.time()
-    prob, gen, unserved, spill = build_and_solve(params)
+    prob, gen, unserved, spill, charge, discharge, soc = build_and_solve(params)
     solve_seconds = round(time.time() - started, 3)
 
-    results = build_hourly_results(params, prob, gen, unserved, spill)
+    results = build_hourly_results(params, prob, gen, unserved, spill, charge, discharge, soc)
     summary = build_plant_summary(params, results)
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)

@@ -356,9 +356,9 @@ meaning, so each one is listed with what it claims.
 
 ### Inputs
 
-The model reads four inputs, one per **role**: plants, fuel, demand and
-profiles. A role is a fixed idea; the file filling it is not. Each role has a
-flag naming its file — `--plants`, `--fuel`, `--demand`, `--profiles` — so
+The model reads four required inputs and an optional **battery** input. Each role
+has a flag naming its file — `--plants`, `--fuel`, `--demand`, `--profiles`,
+`--battery` — so
 `inputs/` can hold several files for a role and a run says which it wants. A
 bare name is looked for in `inputs/`, or in the folder given to `--inputs`; a
 value containing a directory is used as a path in its own right.
@@ -369,6 +369,7 @@ value containing a directory is used as a path in its own right.
 | fuel | `fuel.csv` | — |
 | demand | `demand.csv` | — |
 | profiles | `profiles_basic.csv` | `profiles_renewables.csv` |
+| battery | `battery.csv` | — |
 
 The defaults are the simple case: `plants_basic.csv` leaves `Ramp_rate` blank so
 nothing is ramp limited, and `profiles_basic.csv` holds every factor at 1.0 so
@@ -448,6 +449,20 @@ every hour in `demand.csv`.
 > Accepting both shapes is what keeps archived runs restorable: every archived
 > `profiles.csv` has two rows, and the parser still understands them.
 
+#### battery — one row per battery, optional
+
+| Column | Meaning |
+|---|---|
+| `Battery` | Battery name, unique and distinct from plant names. |
+| `Power (MW)` | Shared hourly charge and discharge limit. |
+| `Capacity (MWh)` | Maximum state of charge. |
+| `Efficiency (MWh/MWhEl)` | One-way efficiency, greater than 0 and at most 1. |
+
+Charge is added to demand and discharge supplies the grid. State of charge is
+recorded after each hour. The first hour follows the final hour, so storage is
+cyclic across the horizon. Charge plus discharge cannot exceed power, but both
+may be positive in the LP.
+
 ### Outputs
 
 #### `results/dispatch_results.csv`
@@ -464,6 +479,9 @@ every hour in `demand.csv`.
 | `Unserved Energy (MWh)` / `Unserved Cost ($)` | Demand not met, and it at LoL. |
 | `Spill (MWh)` / `Spill Cost ($)` | Energy generated and thrown away, and it at `SPILL_COST`. |
 | `Curtailment (MWh)` | Renewable resource available and not taken. Free and implicit. Not spill. |
+| `<Battery> Charge (MWh)` | Grid energy sent to the battery. |
+| `<Battery> Discharge (MWh)` | Grid energy supplied by the battery. |
+| `<Battery> State of Charge (MWh)` | Energy stored after the hour. |
 
 Headline KPIs keep demand and delivered energy distinct. `Energy served` is demand
 minus unserved energy. `Market Cost` remains clearing price times total demand, so
