@@ -178,7 +178,7 @@ $$K(p) = \frac{\text{fuel price}(p)}{\eta_r(p)} - \frac{\text{fuel price}(p)}{\e
 - $s(t) \geq 0$ — MWh generated in hour $t$ and thrown away
 - $V_{up}(p,t) \geq 0$ — upward movement by plant $p$ into hour $t$
 - $V_{dwn}(p,t) \geq 0$ — downward movement by plant $p$ into hour $t$
-- $Cc(b,t) \geq 0$ / $Cd(b,t) \geq 0$ — battery charge and discharge (MWh)
+- $C_c(b,t) \geq 0$ / $C_d(b,t) \geq 0$ — battery charge and discharge (MWh)
 - $SoC(b,t) \geq 0$ — battery state of charge after hour $t$ (MWh)
 
 ### Objective function
@@ -195,7 +195,7 @@ the cost of ramping, lost load and spill.
 Energy balance, one per hour. Spill enters negatively because it is generation
 that did not serve demand:
 
-$$\sum_{p} g(p,t) + \sum_b Cd(b,t) + u(t) - s(t) = D(t) + \sum_b Cc(b,t) \qquad \forall t$$
+$$\sum_{p} g(p,t) + \sum_b C_d(b,t) + u(t) - s(t) = D(t) + \sum_b C_c(b,t) \qquad \forall t$$
 
 Capacity, one per plant per hour:
 
@@ -215,9 +215,9 @@ $$0 \leq V_{up}(p,t) \leq R(p), \qquad 0 \leq V_{dwn}(p,t) \leq R(p)$$
 
 Battery storage, with the predecessor of the first hour defined as the last hour:
 
-$$SoC(b,t) - SoC(b,previous(t)) = n(b)Cc(b,t) - \frac{Cd(b,t)}{n(b)} \qquad \forall b,t$$
+$$SoC(b,t) - SoC(b,(t-1)) = n(b)C_c(b,t) - \frac{C_d(b,t)}{n(b)} \qquad \forall b,t$$
 
-$$0 \leq SoC(b,t) \leq E(b), \qquad Cc(b,t) + Cd(b,t) \leq P(b) \qquad \forall b,t$$
+$$0 \leq SoC(b,t) \leq E(b), \qquad C_c(b,t) + C_d(b,t) \leq P(b) \qquad \forall b,t$$
 
 ### Prices
 

@@ -1,16 +1,16 @@
 {
   "id": "output_profiles",
-  "created": "2026-08-28T14:23:18",
+  "created": "2026-08-28T15:06:44",
   "label": "output_profiles",
   "notes": null,
   "git": {
-    "commit": "2dd01b93984fd71963714487d168e683b4a5d9db",
-    "short": "2dd01b9",
+    "commit": "165478c90513369b978697caabff138144cfe67c",
+    "short": "165478c",
     "branch": "fri_battery",
     "dirty": true
   },
   "code": {
-    "MFDM.py": "0fff63abc9f7e01e",
+    "MFDM.py": "312f35041e609492",
     "dashboard.py": "8009c48907db45e3",
     "runstore.py": "b2c90319b1d9f503",
     "runs.py": "4e5115b58a404967"
@@ -41,7 +41,7 @@
   },
   "solver": {
     "status": "Optimal",
-    "seconds": 0.424
+    "seconds": 0.408
   },
   "kpis": {
     "hours": 744,
