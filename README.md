@@ -19,18 +19,19 @@ Then run it:
 python run.py
 ```
 
-`run.py` is a short, editable script. The five constants at the top of it pick
-the four input files and name the run:
+`run.py` is a short, editable script. The six constants at the top of it pick
+the five input files and name the run:
 
 ```python
 PLANTS = "plants_basic.csv"
 FUEL = "fuel.csv"
 DEMAND = "demand.csv"
 PROFILES = "profiles_basic.csv"
+BATTERY = "battery.csv"
 OUTPUT_NAME = "output_basic"
 ```
 
-It passes those four files to the model, solves, and then opens the dashboard on
+It passes those five files to the model, solves, and then opens the dashboard on
 the result. Change a constant and run it again to try another case:
 `plants_ramping.csv` adds a ramp limit and `profiles_renewables.csv` adds hourly
 wind and solar shapes, and the two are independent, so any of the four
@@ -100,6 +101,8 @@ want kept.
 | `--fuel <file>` | File filling the fuel role |
 | `--demand <file>` | File filling the demand role |
 | `--profiles <file>` | File filling the profiles role |
+| `--battery <file>` | Optional file filling the battery role |
+| `--no-battery` | Solve without battery storage, even if `battery.csv` exists |
 | `--inputs <folder>` | Read the four input CSVs from `<folder>` instead of `inputs/` |
 | `--results <folder>` | Write result CSVs to `<folder>` instead of `results/` |
 | `--no-archive` | Solve and write results without archiving the run |
@@ -144,6 +147,7 @@ figure is the low end of the European Commission JRC estimate for Greece; see
 ### Sets
 - $P$ — power plants
 - $T$ — hours, ascending and contiguous. The horizon does not wrap.
+- $B$ — batteries
 - Fuels
 
 ### Parameters
@@ -154,6 +158,9 @@ figure is the low end of the European Commission JRC estimate for Greece; see
 - $R(p)$ — ramp rate, the most the plant may move between adjacent hours (MW/hr). Left blank in `plants.csv` the plant is unconstrained, moving freely and paying no premium, which is how every plant in `inputs/plants.csv` is currently set.
 - $K(p)$ — ramp premium, the extra cost of a moved MWh over a steady one ($/MWh)
 - $D(t)$ — demand in hour $t$ (MWh)
+- $P(b)$ — battery charge and discharge power (MW)
+- $E(b)$ — battery energy capacity (MWh)
+- $n(b)$ — battery one-way efficiency
 
 $$C(p) = \frac{\text{fuel price}(p)}{\eta(p)} + \text{VOM}(p)$$
 
@@ -165,6 +172,8 @@ $$K(p) = \frac{\text{fuel price}(p)}{\eta_r(p)} - \frac{\text{fuel price}(p)}{\e
 - $s(t) \geq 0$ — MWh generated in hour $t$ and thrown away
 - $V_{up}(p,t) \geq 0$ — upward movement by plant $p$ into hour $t$
 - $V_{dwn}(p,t) \geq 0$ — downward movement by plant $p$ into hour $t$
+- $Cc(b,t) \geq 0$ / $Cd(b,t) \geq 0$ — battery charge and discharge (MWh)
+- $SoC(b,t) \geq 0$ — battery state of charge after hour $t$ (MWh)
 
 ### Objective function
 Minimise the total cost of serving demand — production, ramping, lost load and spill.
@@ -180,7 +189,7 @@ the cost of ramping, lost load and spill.
 Energy balance, one per hour. Spill enters negatively because it is generation
 that did not serve demand:
 
-$$\sum_{p} g(p,t) + u(t) - s(t) = D(t) \qquad \forall t$$
+$$\sum_{p} g(p,t) + \sum_b Cd(b,t) + u(t) - s(t) = D(t) + \sum_b Cc(b,t) \qquad \forall t$$
 
 Capacity, one per plant per hour:
 
@@ -197,6 +206,12 @@ $$g(p,t-1) - g(p,t) \leq V_{dwn}(p,t) \qquad \forall p,\ t > 1$$
 Ramp rate limits, applied as upper bounds on the movement variables:
 
 $$0 \leq V_{up}(p,t) \leq R(p), \qquad 0 \leq V_{dwn}(p,t) \leq R(p)$$
+
+Battery storage, with the predecessor of the first hour defined as the last hour:
+
+$$SoC(b,t) - SoC(b,previous(t)) = n(b)Cc(b,t) - \frac{Cd(b,t)}{n(b)} \qquad \forall b,t$$
+
+$$0 \leq SoC(b,t) \leq E(b), \qquad Cc(b,t) + Cd(b,t) \leq P(b) \qquad \forall b,t$$
 
 ### Prices
 

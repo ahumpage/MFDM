@@ -28,8 +28,9 @@ KPI_DISPLAY = [
     ("avg_production_cost", "Avg production cost", "$/MWh", "lower"),
     ("load_weighted_price", "Load-weighted price", "$/MWh", "lower"),
     ("time_weighted_price", "Time-weighted price", "$/MWh", "lower"),
-    ("producer_surplus", "Producer surplus", "$", None),
+    ("market_surplus", "Market surplus", "$", None),
     ("energy_served_mwh", "Energy served", "MWh", None),
+    ("unserved_mwh", "Unserved energy", "MWh", "lower"),
     ("renewable_used_mwh", "Renewable used", "MWh", "higher"),
     ("renewable_share_pct", "Renewable share", "%", "higher"),
     ("curtailed_mwh", "Curtailed", "MWh", "lower"),
@@ -124,8 +125,9 @@ def cmd_show(args):
 
     print("\n  results")
     for key, label, unit, _ in KPI_DISPLAY:
-        if key in k:
-            print("    {:<22} {:>16}".format(label, fmt(k[key], unit)))
+        value = runstore.kpi_value(k, key)
+        if value is not None:
+            print("    {:<22} {:>16}".format(label, fmt(value, unit)))
 
     print("\n  plants")
     print("    {:<10} {:<8} {:>9} {:>9} {:>14} {:>8} {:>10}".format(
@@ -177,6 +179,8 @@ def cmd_diff(args):
                 for c in info["changes"]:
                     print("    {:<12} {:<26} {} -> {}".format(
                         c["row"], c["field"], c["before"], c["after"]))
+            elif info["kind"] == "presence":
+                print("    {} -> {}".format(info["before"], info["after"]))
             else:
                 before, after = info["before"], info["after"]
                 print("    rows: {:,} -> {:,}".format(before["rows"], after["rows"]))
@@ -253,8 +257,10 @@ def cmd_restore(args):
     print("About to restore inputs from run {} ({}).".format(
         run_id, m.get("label") or "no label"))
     print("This overwrites the following in the working folder:")
-    for name in runstore.INPUT_FILES:
+    for name in targets:
         print("  {}".format(targets[name].name))
+    if "battery.csv" not in targets and runstore.live_path("battery.csv").exists():
+        print("  battery.csv (removed: absent from this run)")
 
     if not args.yes:
         answer = input("Continue? Current inputs are snapshotted first. [y/N] ")

@@ -50,7 +50,7 @@ RESULTS_DIR = REPO_ROOT / "results"
 RUNS_DIR = BASE_DIR
 STORE_DIR = RUNS_DIR / "_store"
 
-INPUT_FILES = ["plants.csv", "fuel.csv", "demand.csv", "profiles.csv"]
+INPUT_FILES = ["plants.csv", "fuel.csv", "demand.csv", "profiles.csv", "battery.csv"]
 OUTPUT_FILES = ["dispatch_results.csv", "plant_summary.csv"]
 
 # Paths relative to the repo root. The manifest keys off the bare file name so
@@ -63,7 +63,7 @@ CODE_FILES = [
 ]
 
 # Inputs small enough that a cell by cell diff is readable and useful.
-SMALL_INPUTS = {"plants.csv", "fuel.csv"}
+SMALL_INPUTS = {"plants.csv", "fuel.csv", "battery.csv"}
 
 MANIFEST_NAME = "manifest.json"
 HASH_LEN = 16
@@ -185,6 +185,8 @@ def compute_kpis(results, summary):
     demand = float(results["Demand (MWh)"].sum())
     prod = float(results["Production Cost ($)"].sum())
     market = float(results["Market Cost ($)"].sum())
+    unserved = float(results["Unserved Energy (MWh)"].sum()) \
+        if "Unserved Energy (MWh)" in results.columns else 0.0
 
     gen_total = float(summary["Total Generation (MWh)"].sum())
 
@@ -197,14 +199,15 @@ def compute_kpis(results, summary):
 
     kpis = {
         "hours": int(len(results)),
-        "energy_served_mwh": demand,
+        "energy_served_mwh": demand - unserved,
+        "unserved_mwh": unserved,
         "energy_generated_mwh": gen_total,
         "production_cost": prod,
         "market_cost": market,
-        "avg_production_cost": prod / demand if demand else 0.0,
+        "avg_production_cost": prod / gen_total if gen_total else 0.0,
         "time_weighted_price": float(results["Clearing Price ($/MWh)"].mean()),
         "load_weighted_price": market / demand if demand else 0.0,
-        "producer_surplus": market - prod,
+        "market_surplus": market - prod,
         "renewable_used_mwh": ren_used,
         "renewable_available_mwh": ren_avail,
         "renewable_share_pct": 100.0 * ren_used / demand if demand else 0.0,
@@ -235,6 +238,15 @@ def compute_kpis(results, summary):
     return kpis
 
 
+def kpi_value(kpis, key):
+    """Read a KPI, including defaults for result files archived before it existed."""
+    if key == "unserved_mwh":
+        return kpis.get(key, 0.0)
+    if key == "market_surplus":
+        return kpis.get(key, kpis.get("producer_surplus"))
+    return kpis.get(key)
+
+
 # --------------------------------------------------------------------------
 # Archiving
 # --------------------------------------------------------------------------
@@ -262,12 +274,15 @@ def archive_run(label=None, notes=None, solver_status=None, seconds=None,
     results_dir = Path(results_dir) if results_dir else RESULTS_DIR
     paths = dict(input_paths or {})
     for name in INPUT_FILES:
+        if name == "battery.csv" and name not in paths:
+            continue
         paths.setdefault(name, live_path(name))
 
     def path_for(name):
         return Path(paths[name]) if name in INPUT_FILES else results_dir / name
 
-    missing = [str(path_for(f)) for f in INPUT_FILES + OUTPUT_FILES
+    archive_inputs = [name for name in INPUT_FILES if name in paths]
+    missing = [str(path_for(f)) for f in archive_inputs + OUTPUT_FILES
                if not path_for(f).exists()]
     if missing:
         raise FileNotFoundError(
@@ -298,7 +313,7 @@ def archive_run(label=None, notes=None, solver_status=None, seconds=None,
     run_dir.mkdir(parents=True)
 
     inputs = {}
-    for name in INPUT_FILES:
+    for name in archive_inputs:
         path = path_for(name)
         digest, size = store_blob(path)
         entry = {"hash": digest, "size": size}
@@ -459,7 +474,7 @@ def restore_targets(manifest):
     the plain name in inputs/ instead.
     """
     targets = {}
-    for name in INPUT_FILES:
+    for name in manifest.get("inputs", {}):
         source = (manifest.get("inputs", {}).get(name) or {}).get("source")
         if source and "/" not in source and "\\" not in source:
             targets[name] = INPUTS_DIR / source
@@ -477,7 +492,7 @@ def check_writable(paths=None):
     matches no run at all.
     """
     if paths is None:
-        paths = [live_path(n) for n in INPUT_FILES]
+        paths = [live_path(n) for n in INPUT_FILES if live_path(n).exists()]
     blocked = []
     for path in paths:
         path = Path(path)
@@ -518,18 +533,26 @@ def restore(run_ref, snapshot_first=True):
         # run is a faithful record of what was there. Only possible if a full
         # set is present to snapshot.
         have_all = (all(Path(p).exists() for p in targets.values())
-                    and all(live_path(f).exists() for f in OUTPUT_FILES))
+                     and all(live_path(f).exists() for f in OUTPUT_FILES))
         if have_all:
+            snapshot_inputs = dict(targets)
+            battery_path = live_path("battery.csv")
+            if battery_path.exists():
+                snapshot_inputs["battery.csv"] = battery_path
             safety = archive_run(label=SAFETY_LABEL,
-                                 notes="Automatic snapshot before restoring {}".format(run_id),
-                                 input_paths=targets)
+                                  notes="Automatic snapshot before restoring {}".format(run_id),
+                                  input_paths=snapshot_inputs)
 
     restored = []
-    for name in INPUT_FILES:
+    for name in targets:
         src = load_input(run_id, name)
         target = Path(targets[name])
         shutil.copy2(str(src), str(target))
         restored.append(target.name)
+
+    battery_path = live_path("battery.csv")
+    if "battery.csv" not in targets and battery_path.exists():
+        battery_path.unlink()
 
     return {
         "restored_run": run_id,
@@ -663,6 +686,11 @@ def diff(run_ref_a, run_ref_b):
         eb = mb["inputs"].get(name, {})
         if ea.get("hash") == eb.get("hash"):
             continue
+        if not ea or not eb:
+            input_changed[name] = {"kind": "presence",
+                                   "before": "present" if ea else "absent",
+                                   "after": "present" if eb else "absent"}
+            continue
         if name in SMALL_INPUTS:
             input_changed[name] = {"kind": "cells",
                                    "changes": diff_small_csv(a, b, name)}
@@ -675,10 +703,14 @@ def diff(run_ref_a, run_ref_b):
 
     # --- results ---
     ka, kb = ma["kpis"], mb["kpis"]
-    scalar_keys = [k for k in ka if k != "plants"]
+    scalar_keys = (set(ka) | set(kb)) - {"plants", "producer_surplus"}
+    if "market_surplus" in ka or "market_surplus" in kb \
+            or "producer_surplus" in ka or "producer_surplus" in kb:
+        scalar_keys.add("market_surplus")
+    scalar_keys = sorted(scalar_keys)
     kpi_delta = []
     for k in scalar_keys:
-        va, vb = ka.get(k), kb.get(k)
+        va, vb = kpi_value(ka, k), kpi_value(kb, k)
         if not isinstance(va, (int, float)) or not isinstance(vb, (int, float)):
             continue
         delta = vb - va

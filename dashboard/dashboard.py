@@ -106,6 +106,14 @@ class Run(object):
         self.has_stack = STACK_COL in results.columns
         self.has_ramp = RAMP_COST_COL in results.columns
         self.has_spill = SPILL_COL in results.columns
+        self.batteries = self._find_batteries()
+        self.has_storage = bool(self.batteries)
+
+    def _find_batteries(self):
+        suffix = " Charge (MWh)"
+        return [c[:-len(suffix)] for c in self.results.columns if c.endswith(suffix)
+                and "{} Discharge (MWh)".format(c[:-len(suffix)]) in self.results.columns
+                and "{} State of Charge (MWh)".format(c[:-len(suffix)]) in self.results.columns]
 
     def _build_meta(self):
         meta = {}
@@ -224,6 +232,8 @@ def aggregate(run, df, resolution):
     df["bucket"] = (df["Hour"] - 1) // step
 
     sum_cols = [run.meta[p]["column"] for p in run.plant_order]
+    for b in run.batteries:
+        sum_cols += ["{} Charge (MWh)".format(b), "{} Discharge (MWh)".format(b)]
     sum_cols += [DEMAND_COL, PROD_COST_COL, MARKET_COST_COL,
                  RAMP_UP_COL, RAMP_DOWN_COL, RAMP_COST_COL,
                  UNSERVED_COL, SPILL_COL]
@@ -335,16 +345,43 @@ def dispatch_traces(run, agg, plants, overlays, resolution, stackgroup="one"):
                 marker_line_width=0,
                 hovertemplate=hover,
             ), False))
+
         else:
             traces.append((go.Scatter(
                 x=agg["x"], y=agg[m["column"]],
                 name=name, legendgroup=p, mode="lines",
                 line=dict(width=0.5, color=m["colour"]),
-                fillcolor=m["colour"],
-                stackgroup=stackgroup,
+                fillcolor=m["colour"], stackgroup=stackgroup,
                 hovertemplate=hover,
             ), False))
 
+    supply_columns = [run.meta[p]["column"] for p in run.plant_order if p in plants]
+    for b in run.batteries:
+        discharge_col = "{} Discharge (MWh)".format(b)
+        charge_col = "{} Charge (MWh)".format(b)
+        if use_bars:
+            traces.append((go.Bar(
+                x=agg["x"], y=agg[discharge_col], name="{} discharge".format(b),
+                legendgroup="storage-{}".format(b), marker_color="#6A3D9A",
+                marker_line_width=0,
+                hovertemplate="%{{y:,.1f}} MWh<extra>{} discharge</extra>".format(b),
+            ), False))
+            base = agg[supply_columns].sum(axis=1) if supply_columns else 0.0
+            base = base + agg[["{} Discharge (MWh)".format(x) for x in run.batteries]].sum(axis=1)
+            traces.append((go.Bar(
+                x=agg["x"], y=agg[charge_col], base=base, name="{} charge (load)".format(b),
+                legendgroup="storage-{}".format(b), marker_color="#B7A0CF",
+                marker_pattern_shape="/", marker_line_width=0,
+                hovertemplate="%{{y:,.1f}} MWh<extra>{} charge</extra>".format(b),
+            ), False))
+        else:
+            traces.append((go.Scatter(
+                x=agg["x"], y=agg[discharge_col], name="{} discharge".format(b),
+                legendgroup="storage-{}".format(b), mode="lines",
+                line=dict(width=0.5, color="#6A3D9A"), fillcolor="#6A3D9A",
+                stackgroup=stackgroup,
+                hovertemplate="%{{y:,.1f}} MWh<extra>{} discharge</extra>".format(b),
+            ), False))
     if "demand" in overlays:
         traces.append((go.Scatter(
             x=agg["x"], y=agg[DEMAND_COL],
@@ -428,6 +465,36 @@ def fig_price(run, agg, overlays, resolution):
     ylab = ("Clearing price ($/MWh)" if resolution == "hourly"
             else "Load-weighted avg price ($/MWh)")
     return base_layout(fig, "Market clearing price", axis_label(resolution), ylab)
+
+
+def fig_storage(run, hourly, resolution):
+    if not run.has_storage:
+        return empty_figure("No storage results in this run")
+    agg = aggregate(run, hourly, resolution)
+    if agg.empty:
+        return empty_figure("No hours in the selected range")
+
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
+                        subplot_titles=("Charge and discharge", "State of charge"))
+    for b in run.batteries:
+        fig.add_trace(go.Bar(x=agg["x"], y=agg["{} Charge (MWh)".format(b)],
+                             name="{} charge".format(b), marker_color="#B7A0CF",
+                             marker_pattern_shape="/"), row=1, col=1)
+        fig.add_trace(go.Bar(x=agg["x"], y=agg["{} Discharge (MWh)".format(b)],
+                             name="{} discharge".format(b), marker_color="#6A3D9A"), row=1, col=1)
+        if resolution == "hourly":
+            soc = hourly["{} State of Charge (MWh)".format(b)]
+        else:
+            step = HOURS_PER_DAY if resolution == "daily" else HOURS_PER_WEEK
+            grouped = hourly.assign(bucket=(hourly["Hour"] - 1) // step).groupby("bucket")
+            soc = grouped["{} State of Charge (MWh)".format(b)].last().to_numpy()
+        fig.add_trace(go.Scatter(x=agg["x"], y=soc, name="{} SoC".format(b),
+                                 mode="lines", line=dict(width=2)), row=2, col=1)
+    fig.update_layout(barmode="group")
+    base_layout(fig, "Battery storage", axis_label(resolution), "Energy (MWh)")
+    fig.update_yaxes(title_text=energy_label(resolution), row=1, col=1)
+    fig.update_yaxes(title_text="State of charge (MWh)", row=2, col=1)
+    return fig
 
 
 def fig_costs(run, agg, resolution):
@@ -585,6 +652,9 @@ def run_qa(run, hourly):
         balance = balance + hourly[UNSERVED_COL]
     if SPILL_COL in hourly.columns:
         balance = balance - hourly[SPILL_COL]
+    for b in run.batteries:
+        balance = balance + hourly["{} Discharge (MWh)".format(b)]
+        balance = balance - hourly["{} Charge (MWh)".format(b)]
     balance_error = (balance - hourly[DEMAND_COL]).abs()
     out["max_balance_error"] = float(balance_error.max())
 
@@ -847,6 +917,8 @@ def build_kpis(run, hourly):
     demand = hourly[DEMAND_COL].sum()
     prod = hourly[PROD_COST_COL].sum()
     market = hourly[MARKET_COST_COL].sum()
+    unserved = hourly[UNSERVED_COL].sum() if UNSERVED_COL in hourly.columns else 0.0
+    generated = sum(hourly[run.meta[p]["column"]].sum() for p in run.plant_order)
 
     # Production cost is fuel and VOM only, so the ramp and spill components
     # are shown beside it rather than left missing from the reader's sum.
@@ -861,7 +933,8 @@ def build_kpis(run, hourly):
         kpi_card("Hours", "{:,}".format(len(hourly)),
                  "hour {:,} to {:,}".format(int(hourly["Hour"].min()),
                                             int(hourly["Hour"].max()))),
-        kpi_card("Energy served", "{:,.0f} MWh".format(demand)),
+        kpi_card("Energy served", "{:,.0f} MWh".format(demand - unserved)),
+        kpi_card("Unserved energy", "{:,.0f} MWh".format(unserved)),
         kpi_card("Production cost", "${:,.0f}".format(prod), "fuel and VOM"),
     ]
     if run.has_ramp:
@@ -873,9 +946,9 @@ def build_kpis(run, hourly):
             "the LP objective"))
     cards += [
         kpi_card("Market cost", "${:,.0f}".format(market), "price x demand"),
-        kpi_card("Avg production cost", "${:,.2f}/MWh".format(prod / demand if demand else 0)),
+        kpi_card("Avg production cost", "${:,.2f}/MWh".format(prod / generated if generated else 0)),
         kpi_card("Load-weighted price", "${:,.2f}/MWh".format(market / demand if demand else 0)),
-        kpi_card("Producer surplus", "${:,.0f}".format(market - prod), "market - production"),
+        kpi_card("Market surplus", "${:,.0f}".format(market - prod), "market - production"),
     ]
     if run.has_spill and total(SPILL_COL) > QA_TOL:
         cards.append(kpi_card("Spilled", "{:,.0f} MWh".format(total(SPILL_COL)),
@@ -1081,6 +1154,9 @@ app.layout = html.Div([
                 ], open=False),
             ], style=CARD),
         ]),
+        dcc.Tab(label="Storage", value="tab-storage", children=[
+            html.Div([dcc.Graph(id="graph-storage")], style=CARD),
+        ]),
         dcc.Tab(label="Duration curves and mix", value="tab-duration", children=[
             html.Div([
                 dcc.Graph(id="graph-price-duration"),
@@ -1147,10 +1223,12 @@ C_RUN_B = "#D55E00"
 COMPARE_KPIS = [
     ("production_cost", "Production cost", "$", "lower"),
     ("market_cost", "Market cost", "$", "lower"),
+    ("market_surplus", "Market surplus", "$", None),
     ("load_weighted_price", "Load-weighted price", "$/MWh", "lower"),
     ("renewable_share_pct", "Renewable share", "%", "higher"),
     ("curtailed_mwh", "Curtailed", "MWh", "lower"),
     ("energy_served_mwh", "Energy served", "MWh", None),
+    ("unserved_mwh", "Unserved energy", "MWh", "lower"),
 ]
 
 
@@ -1161,6 +1239,7 @@ def window_kpis(run, lo, hi):
     demand = float(h[DEMAND_COL].sum())
     prod = float(h[PROD_COST_COL].sum())
     market = float(h[MARKET_COST_COL].sum())
+    unserved = float(h[UNSERVED_COL].sum()) if UNSERVED_COL in h.columns else 0.0
     ren_used = sum(float(h[run.meta[p]["column"]].sum())
                    for p in run.plant_order if run.meta[p]["profiled"])
     curtailed = float(h["Curtailment (MWh)"].sum()) \
@@ -1173,10 +1252,12 @@ def window_kpis(run, lo, hi):
     return {
         "production_cost": prod,
         "market_cost": market,
+        "market_surplus": market - prod,
         "load_weighted_price": market / demand if demand else 0.0,
         "renewable_share_pct": 100.0 * ren_used / demand if demand else 0.0,
         "curtailed_mwh": curtailed,
-        "energy_served_mwh": demand,
+        "energy_served_mwh": demand - unserved,
+        "unserved_mwh": unserved,
         "renewable_available_mwh": ren_avail,
     }
 
@@ -1270,6 +1351,10 @@ def compare_inputs_table(a, b):
                             "textAlign": "left"},
                 style_header={"backgroundColor": "#F4F5F7", "fontWeight": "600"},
             ))
+        elif info["kind"] == "presence":
+            blocks.append(html.Div("A: {}. B: {}.".format(
+                info["before"], info["after"]),
+                style={"fontSize": "13px", "color": "#666"}))
         else:
             before, after = info["before"], info["after"]
             rows = [{"Series": "(rows)", "A": "{:,}".format(before["rows"]),
@@ -1785,7 +1870,17 @@ def update_dispatch(rng, resolution, plants, overlays):
     run = get_run(rng.get("run"))
     hourly = slice_hours(run, rng["lo"], rng["hi"])
     return fig_dispatch(run, aggregate(run, hourly, resolution), plants or [],
-                        overlays or [], resolution)
+                         overlays or [], resolution)
+
+
+@app.callback(
+    Output("graph-storage", "figure"),
+    Input("store-range", "data"),
+    Input("resolution", "value"),
+)
+def update_storage(rng, resolution):
+    run = get_run(rng.get("run"))
+    return fig_storage(run, slice_hours(run, rng["lo"], rng["hi"]), resolution)
 
 
 @app.callback(

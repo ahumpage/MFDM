@@ -96,8 +96,11 @@ once regardless of how much energy flowed. Always reported beside the
 load-weighted figure and never instead of it: cheap hours are usually quiet hours,
 so it understates what demand cost.
 
-**Producer surplus** — `market cost - production cost`, across the fleet. What
-generators collectively earn above what it cost them to generate.
+**Market surplus** — `market cost - production cost`, across the system. Includes
+the cost of unserved demand, so it is not generator revenue in a scarcity hour.
+
+**Average production cost** — production cost per MWh generated, including energy
+that was later spilled.
 
 **Inframarginal rent** — the same idea for one plant: what it earns at the
 clearing price above its own marginal cost. A plant earns rent in every hour the
@@ -111,6 +114,8 @@ Four distinct concepts that are easy to conflate. Two are about too little energ
 two about too much.
 
 **Unserved energy** — demand the fleet could not meet. Priced at LoL. Too little.
+
+**Energy served** — demand delivered to consumers: `demand - unserved energy`.
 
 **Scarcity hour** — an hour with unserved energy. Prices at LoL, because the
 marginal unit is shed load.
@@ -159,6 +164,25 @@ written `ramp_cost` in the code; the two are the same number.
 
 **Ramp cost** — the premium multiplied by the energy moved. In the output columns
 this always means **the premium alone**, never the total cost of ramped energy.
+
+---
+
+## Storage
+
+**Battery** — an energy store that charges from and discharges to the grid. It is
+not a plant and does not take a place in merit order.
+
+**Charge** — grid energy sent into a battery during an hour. It adds to demand.
+
+**Discharge** — grid energy supplied by a battery during an hour.
+
+**State of charge (SoC)** — energy stored in a battery after an hour's operation.
+
+**One-way efficiency** — the fraction of charge energy stored, and the fraction
+of stored energy delivered on discharge. Round-trip efficiency is its square.
+
+**Cyclic storage horizon** — the first hour's SoC transition begins from the last
+hour's SoC, so stored energy ends where it began over the horizon.
 
 **Ceiling** — the most a plant could generate in an hour:
 `min(availability, previous output + ramp rate)`.
