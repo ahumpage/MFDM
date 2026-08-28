@@ -12,6 +12,8 @@ run_archive/**
 !run_archive/output_profiles/**
 !run_archive/output_ramping/
 !run_archive/output_ramping/**
+!run_archive/output_battery/
+!run_archive/output_battery/**
 
 # Word lock files
 ~$*

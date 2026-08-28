@@ -1,11 +1,11 @@
 {
   "id": "output_ramping",
-  "created": "2026-08-28T14:00:22",
+  "created": "2026-08-28T14:18:11",
   "label": "output_ramping",
   "notes": null,
   "git": {
-    "commit": "faec080e413a2be16b726d4c7098599bcf39b2cf",
-    "short": "faec080",
+    "commit": "2dd01b93984fd71963714487d168e683b4a5d9db",
+    "short": "2dd01b9",
     "branch": "fri_battery",
     "dirty": true
   },
@@ -17,7 +17,7 @@
   },
   "inputs": {
     "plants.csv": {
-      "hash": "f4985c2f354a546d",
+      "hash": "40169b4ab12c61ac",
       "size": 274,
       "source": "plants_ramping.csv"
     },
@@ -36,29 +36,29 @@
     }
   },
   "outputs": {
-    "dispatch_results.csv": "53fa2bf8ebdaa275",
-    "plant_summary.csv": "2db3c757a8086608"
+    "dispatch_results.csv": "dda5b7e336dbd988",
+    "plant_summary.csv": "52a6898096b28ed8"
   },
   "solver": {
     "status": "Optimal",
-    "seconds": 0.439
+    "seconds": 0.449
   },
   "kpis": {
     "hours": 744,
     "energy_served_mwh": 461279.447689,
     "unserved_mwh": 0.0,
-    "energy_generated_mwh": 461279.44770799996,
-    "production_cost": 7273187.89047,
-    "market_cost": 16628280.390429,
-    "avg_production_cost": 15.767422387034438,
-    "time_weighted_price": 36.1861559139785,
-    "load_weighted_price": 36.04817095956979,
-    "market_surplus": 9355092.499959,
-    "renewable_used_mwh": 259618.364951,
+    "energy_generated_mwh": 461279.44751900004,
+    "production_cost": 6327372.732802,
+    "market_cost": 14608954.234602,
+    "avg_production_cost": 13.71700553066886,
+    "time_weighted_price": 31.789112903225803,
+    "load_weighted_price": 31.670507558471428,
+    "market_surplus": 8281581.501800001,
+    "renewable_used_mwh": 253375.639233,
     "renewable_available_mwh": 266290.0,
-    "renewable_share_pct": 56.28223114029518,
-    "curtailed_mwh": 6671.635049,
-    "curtailment_pct": 2.5054020237335237,
+    "renewable_share_pct": 54.92888107250527,
+    "curtailed_mwh": 12914.360766999998,
+    "curtailment_pct": 4.849735539073942,
     "plants": [
       {
         "plant": "Plant 1",
@@ -66,10 +66,10 @@
         "capacity_mw": 700.0,
         "profiled": true,
         "marginal_cost": 0.5,
-        "generation_mwh": 128535.5544,
-        "capacity_factor_pct": 24.680406,
+        "generation_mwh": 128032.25142,
+        "capacity_factor_pct": 24.583766,
         "hours_running": 403,
-        "hours_setting_price": 12
+        "hours_setting_price": 3
       },
       {
         "plant": "Plant 2",
@@ -77,21 +77,21 @@
         "capacity_mw": 500.0,
         "profiled": true,
         "marginal_cost": 1.0,
-        "generation_mwh": 131082.810551,
-        "capacity_factor_pct": 35.237315,
-        "hours_running": 731,
-        "hours_setting_price": 14
+        "generation_mwh": 125343.387813,
+        "capacity_factor_pct": 33.694459,
+        "hours_running": 720,
+        "hours_setting_price": 1
       },
       {
         "plant": "Plant 3",
         "technology": "Coal",
-        "capacity_mw": 100.0,
+        "capacity_mw": 200.0,
         "profiled": false,
         "marginal_cost": 21.5,
-        "generation_mwh": 65237.00199,
-        "capacity_factor_pct": 87.684142,
-        "hours_running": 718,
-        "hours_setting_price": 80
+        "generation_mwh": 124914.686836,
+        "capacity_factor_pct": 83.948042,
+        "hours_running": 740,
+        "hours_setting_price": 186
       },
       {
         "plant": "Plant 4",
@@ -99,10 +99,10 @@
         "capacity_mw": 600.0,
         "profiled": false,
         "marginal_cost": 41.6,
-        "generation_mwh": 136424.080767,
-        "capacity_factor_pct": 30.56095,
-        "hours_running": 638,
-        "hours_setting_price": 638
+        "generation_mwh": 82989.12145,
+        "capacity_factor_pct": 18.590753,
+        "hours_running": 554,
+        "hours_setting_price": 554
       },
       {
         "plant": "Plant 5",
