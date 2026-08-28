@@ -2,7 +2,7 @@ Start reading in model/MFDM.py, this is the main model which the repo is based a
 The purpose of the repo is to build a power dispatch model from the ground up, adding in
 complications and adjusting, as part of onboarding training.
 The model should be built using PuLP.
-The code should be readable and easy to follow, so that it can be used as a learning tool.
+The code should be readable and easy to follow, so that it can be used as a learning tool. The descriptive strings and comments should be as short as possible, and not explain reasoning behind choices in the model, but be at most one line explinations of what a function is doing.
 
 Read CONTEXT.md before using a term that sounds domain-specific. Several are deliberate
 collision-resolutions and the everyday meaning is the wrong one: spill is not

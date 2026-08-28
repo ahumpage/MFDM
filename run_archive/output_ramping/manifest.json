@@ -1,17 +1,17 @@
 {
   "id": "output_ramping",
-  "created": "2026-08-27T15:03:33",
+  "created": "2026-08-28T09:14:54",
   "label": "output_ramping",
   "notes": null,
   "git": {
-    "commit": "7de317b09c96bb860f54200948050e0e1055214b",
-    "short": "7de317b",
+    "commit": "ff952ed8eb6c8d0ad2b3dd7e2deaf35226013189",
+    "short": "ff952ed",
     "branch": "thurschanges",
     "dirty": true
   },
   "code": {
     "MFDM.py": "113aa324e08a193a",
-    "dashboard.py": "f1e87f655107d4cc",
+    "dashboard.py": "4c52a89cd89a839d",
     "runstore.py": "01b4109c7bef4de6",
     "runs.py": "2d347ff09c2020ad"
   },
@@ -41,7 +41,7 @@
   },
   "solver": {
     "status": "Optimal",
-    "seconds": 0.389
+    "seconds": 0.395
   },
   "kpis": {
     "hours": 744,
