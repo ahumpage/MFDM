@@ -1,7 +1,7 @@
 # How does a test drive this model?
 
 - **Type**: `wayfinder:grilling` (HITL)
-- **Status**: open
+- **Status**: resolved
 - **Assignee**: unclaimed
 - **Blocked by**: —
 - **Part of**: [Map: Onboarding, documentation and AI readiness](../onboarding_plan.md)
@@ -70,3 +70,18 @@ This is a design decision, not an investigation — the investigation is above.
 [Which cases must the test suite prove?](10-test-cases.md) waits on it.
 
 ## Decision
+
+- The test seam is `run_model(plants, fuel, demand, profile, battery=None)`. It
+  accepts in-memory input tables and returns `(results, summary, diagnostics)`.
+  `main()` remains responsible for CLI parsing, file I/O, archiving and display.
+- `diagnostics` contains the solver status, LP objective, reported objective,
+  objective error, energy-balance error and structured merit-order departures.
+  `report()` and the merit-order warning format this data; tests do not match
+  stdout.
+- Use pytest, run from the repository root with `python -m pytest`. The runner
+  is pinned in `requirements.txt` and exposed as the `test` optional dependency.
+- Reuse the worked ramping examples as seam smoke tests. The complete behavioural
+  case set remains the decision of [10-test-cases.md](10-test-cases.md).
+
+The in-memory seam keeps tests isolated from the CLI's mutable file paths, while
+the diagnostic data separates assertions from presentation text.

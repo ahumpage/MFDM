@@ -97,6 +97,9 @@ ticket and the Origin disagree, the ticket is right.
   everywhere in code and live documents; the research note keeps the source's `VoLL`, and
   planning documents keep their historical wording. Owner's preference, taken over the
   standard-term argument. See [VOLL or LoL?](onboarding_plan/02-voll-or-lol.md).
+- **The model test seam.** `run_model` accepts in-memory input tables and returns output
+  tables plus structured diagnostics; pytest runs the worked ramping examples through it.
+  See [How does a test drive this model?](onboarding_plan/04-test-seam.md).
 
 ## Not yet specified
 

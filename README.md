@@ -19,6 +19,12 @@ Then run it:
 python run.py
 ```
 
+Run the test suite from the repository root with:
+
+```
+python -m pytest
+```
+
 `run.py` is a short, editable script. The six constants at the top of it pick
 the five input files and name the run:
 

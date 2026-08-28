@@ -95,13 +95,7 @@ def load_data():
     # because its first column heading sits on the row below.
     profile = pd.read_csv(PROFILE_FILE, header=[0, 1] if has_region_row(PROFILE_FILE)
                                         else 0)
-    if isinstance(profile.columns, pd.MultiIndex):
-        flat = []
-        for region, series in profile.columns:
-            region = "" if str(region).startswith("Unnamed") else str(region).strip()
-            series = str(series).strip()
-            flat.append("{} {}".format(region, series).strip())
-        profile.columns = flat
+    profile = normalize_profile_columns(profile)
 
     for df in (plants, fuel, demand, profile):
         df.columns = [c.strip() for c in df.columns]
@@ -124,6 +118,8 @@ def load_data():
 # Parameters
 
 def build_parameters(plants, fuel, demand, profile, battery):
+
+    profile = normalize_profile_columns(profile)
 
     # --- sets ---
     PLANTS = list(plants["Plant"])
@@ -287,6 +283,20 @@ def find_column(df, prefix, filename):
             "{} has more than one column starting with '{}': {}. "
             "Column names must be unambiguous.".format(filename, prefix, matches))
     return matches[0]
+
+
+def normalize_profile_columns(profile):
+    """Flatten an optional region row in a profiles table."""
+    profile = profile.copy()
+    if isinstance(profile.columns, pd.MultiIndex):
+        flat = []
+        for region, series in profile.columns:
+            region = "" if str(region).startswith("Unnamed") else str(region).strip()
+            series = str(series).strip()
+            flat.append("{} {}".format(region, series).strip())
+        profile.columns = flat
+    profile.columns = [str(c).strip() for c in profile.columns]
+    return profile
 
 
 def check_horizon(HOURS):
@@ -653,8 +663,41 @@ def dispatch_floor(params, output):
     return np.maximum(0.0, floor)
 
 
-def warn_merit_order_departures(params, results):
+def warn_merit_order_departures(diagnostics):
     """Print where the dispatch departs from merit order; a note, not a gate."""
+    rows = diagnostics["merit_order_departures"]
+    if not rows:
+        return
+
+    worst = diagnostics["largest_merit_order_departure"]
+    n_hours_affected = len(set(r["hour"] for r in rows))
+
+    print("-" * 68)
+    print("MERIT ORDER NOTE  ({} plant-hour(s) across {} hour(s))"
+          .format(len(rows), n_hours_affected))
+    print("-" * 68)
+    print("  A plant generated below its ramp-adjusted ceiling while something")
+    print("  more expensive was running. Under ramping this is often correct:")
+    print("  holding back can be cheaper than paying to move, and a plant may")
+    print("  stay low so that it can reach a low demand later. Worth a look,")
+    print("  not proof of a bug.")
+    print("  Cheap headroom left unused is worth at most ${:,.2f}.".format(
+        diagnostics["merit_order_departure_value"]))
+    print("")
+    for r in rows[:10]:
+        print("  hour {:>5}   {:<10} ${:>8.2f}/MWh   generated {:>9,.2f} of "
+              "{:>9,.2f} MWh   ({:,.2f} MWh spare)   while {} was running"
+              .format(r["hour"], r["plant"], r["mc"], r["gen"], r["ceiling"],
+                      r["headroom"], r["above"]))
+    if len(rows) > 10:
+        print("  ... and {} more.".format(len(rows) - 10))
+    print("")
+    print("  Largest is hour {}: {} left {:,.2f} MWh unused.\n"
+          .format(worst["hour"], worst["plant"], worst["headroom"]))
+
+
+def build_merit_order_diagnostics(params, results):
+    """Return merit-order departures from the published results."""
     PLANTS, HOURS = params["PLANTS"], params["HOURS"]
     mc_vec = params["mc_vec"]
 
@@ -681,7 +724,11 @@ def warn_merit_order_departures(params, results):
     flagged = undercut & underused & ~pinned
 
     if not flagged.any():
-        return
+        return {
+            "merit_order_departures": [],
+            "merit_order_departure_value": 0.0,
+            "largest_merit_order_departure": None,
+        }
 
     headroom = ceiling - output
     # An upper bound on any waste, not a bill: some headroom is legitimately
@@ -700,30 +747,11 @@ def warn_merit_order_departures(params, results):
             "above": name_last_in_stack(params, comparator[t_index]),
         })
     rows.sort(key=lambda r: (r["hour"], r["plant"]))
-    worst = max(rows, key=lambda r: r["headroom"])
-    n_hours_affected = len(set(r["hour"] for r in rows))
-
-    print("-" * 68)
-    print("MERIT ORDER NOTE  ({} plant-hour(s) across {} hour(s))"
-          .format(len(rows), n_hours_affected))
-    print("-" * 68)
-    print("  A plant generated below its ramp-adjusted ceiling while something")
-    print("  more expensive was running. Under ramping this is often correct:")
-    print("  holding back can be cheaper than paying to move, and a plant may")
-    print("  stay low so that it can reach a low demand later. Worth a look,")
-    print("  not proof of a bug.")
-    print("  Cheap headroom left unused is worth at most ${:,.2f}.".format(value))
-    print("")
-    for r in rows[:10]:
-        print("  hour {:>5}   {:<10} ${:>8.2f}/MWh   generated {:>9,.2f} of "
-              "{:>9,.2f} MWh   ({:,.2f} MWh spare)   while {} was running"
-              .format(r["hour"], r["plant"], r["mc"], r["gen"], r["ceiling"],
-                      r["headroom"], r["above"]))
-    if len(rows) > 10:
-        print("  ... and {} more.".format(len(rows) - 10))
-    print("")
-    print("  Largest is hour {}: {} left {:,.2f} MWh unused.\n"
-          .format(worst["hour"], worst["plant"], worst["headroom"]))
+    return {
+        "merit_order_departures": rows,
+        "merit_order_departure_value": value,
+        "largest_merit_order_departure": max(rows, key=lambda r: r["headroom"]),
+    }
 
 
 def name_last_in_stack(params, price):
@@ -739,7 +767,7 @@ def name_last_in_stack(params, price):
 
 # Report
 
-def report(params, results, summary, objective_value=None):
+def report(params, results, summary, diagnostics):
     print("-" * 68)
     print("MARGINAL COSTS  (fuel price / efficiency + VOM)")
     print("-" * 68)
@@ -822,16 +850,16 @@ def report(params, results, summary, objective_value=None):
 
     # Check that claim rather than assert it: if a cost is ever double counted
     # or dropped from a column, this is where it shows up.
-    if objective_value is not None:
-        drift = abs(objective - objective_value)
-        if drift > max(1e-3, 1e-9 * abs(objective_value)):
-            print("  WARNING: those four components sum to ${:,.2f} but the solver "
-                  "minimised\n           ${:,.2f}, a difference of ${:,.2f}. One of "
-                  "the cost columns is\n           wrong."
-                  .format(objective, objective_value, drift))
-        else:
-            print("  {:<26} {:>16} {:<6} (reconciles with the solver)"
-                  .format("", "", ""))
+    objective_value = diagnostics["objective"]
+    drift = diagnostics["objective_error"]
+    if drift > max(1e-3, 1e-9 * abs(objective_value)):
+        print("  WARNING: those four components sum to ${:,.2f} but the solver "
+              "minimised\n           ${:,.2f}, a difference of ${:,.2f}. One of "
+              "the cost columns is\n           wrong."
+              .format(objective, objective_value, drift))
+    else:
+        print("  {:<26} {:>16} {:<6} (reconciles with the solver)"
+              .format("", "", ""))
     print("")
     print("  Average production cost    {:>16,.2f} $/MWh".format(
         prod_cost / total_gen if total_gen else 0.0))
@@ -863,8 +891,7 @@ def report(params, results, summary, objective_value=None):
                        for b in params["BATTERIES"])
     total_discharge = sum(results["{} Discharge (MWh)".format(b)].sum()
                           for b in params["BATTERIES"])
-    gap = abs(total_gen + total_discharge + total_unserved - total_spill
-              - total_demand - total_charge)
+    gap = diagnostics["energy_balance_error"]
     print("\n  Energy balance check: |generation + discharge + unserved - spill - demand - charge| = "
           "{:.6f} MWh {}".format(gap, "OK" if gap < 1e-3 else "<-- PROBLEM"))
 
@@ -1010,6 +1037,43 @@ def input_paths():
     return paths
 
 
+def run_model(plants, fuel, demand, profile, battery=None):
+    """Solve in-memory inputs and return output tables with diagnostics."""
+    if battery is None:
+        battery = pd.DataFrame(columns=["Battery", "Power (MW)", "Capacity (MWh)",
+                                        "Efficiency (MWh/MWhEl)"])
+    params = build_parameters(plants, fuel, demand, profile, battery)
+    return solve_model(params)
+
+
+def solve_model(params):
+    """Solve prepared parameters and return output tables with diagnostics."""
+    prob, gen, unserved, spill, charge, discharge, soc = build_and_solve(params)
+    results = build_hourly_results(params, prob, gen, unserved, spill, charge, discharge, soc)
+    summary = build_plant_summary(params, results)
+
+    reported_objective = float(results[["Production Cost ($)", "Ramp Cost ($)",
+                                       "Unserved Cost ($)", "Spill Cost ($)"]].sum().sum())
+    objective = float(pulp.value(prob.objective))
+    total_charge = sum(results["{} Charge (MWh)".format(b)].sum()
+                       for b in params["BATTERIES"])
+    total_discharge = sum(results["{} Discharge (MWh)".format(b)].sum()
+                          for b in params["BATTERIES"])
+    energy_balance_error = abs(
+        summary["Total Generation (MWh)"].sum() + total_discharge
+        + results["Unserved Energy (MWh)"].sum() - results["Spill (MWh)"].sum()
+        - results["Demand (MWh)"].sum() - total_charge)
+    diagnostics = build_merit_order_diagnostics(params, results)
+    diagnostics.update({
+        "solver_status": pulp.LpStatus[prob.status],
+        "objective": objective,
+        "reported_objective": reported_objective,
+        "objective_error": abs(reported_objective - objective),
+        "energy_balance_error": float(energy_balance_error),
+    })
+    return results, summary, diagnostics
+
+
 def main(argv=None):
     args = parse_args(argv)
     use_directories(args.inputs, args.results)
@@ -1040,11 +1104,8 @@ def main(argv=None):
     warn_capacity_shortfall(params)
 
     started = time.time()
-    prob, gen, unserved, spill, charge, discharge, soc = build_and_solve(params)
+    results, summary, diagnostics = solve_model(params)
     solve_seconds = round(time.time() - started, 3)
-
-    results = build_hourly_results(params, prob, gen, unserved, spill, charge, discharge, soc)
-    summary = build_plant_summary(params, results)
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     results_path = RESULTS_DIR / "dispatch_results.csv"
@@ -1055,7 +1116,7 @@ def main(argv=None):
 
     # A note rather than a gate, so it neither stops the run nor blocks
     # archiving.
-    warn_merit_order_departures(params, results)
+    warn_merit_order_departures(diagnostics)
 
     # A failure here must not lose the results, which are already on disk.
     # A run over custom files or folders is archived like any other, because
@@ -1064,7 +1125,7 @@ def main(argv=None):
         try:
             manifest = runstore.archive_run(
                 label=args.label, notes=args.notes,
-                solver_status=pulp.LpStatus[prob.status], seconds=solve_seconds,
+                solver_status=diagnostics["solver_status"], seconds=solve_seconds,
                 input_paths=input_paths(), results_dir=RESULTS_DIR,
                 # A labelled run is named after its label alone, so rerunning
                 # the same case replaces it instead of piling up near-copies.
@@ -1083,7 +1144,7 @@ def main(argv=None):
                   "Results were still written.\n"
                   .format(type(exc).__name__, exc))
 
-    report(params, results, summary, objective_value=pulp.value(prob.objective))
+    report(params, results, summary, diagnostics)
 
 
 if __name__ == "__main__":

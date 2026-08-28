@@ -15,6 +15,11 @@ dependencies = [
     "pulp==3.1.1",
 ]
 
+[project.optional-dependencies]
+test = [
+    "pytest==8.3.5",
+]
+
 [project.scripts]
 myfirstdispachmodel = "myfirstdispachmodel:main"
 
